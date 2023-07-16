@@ -14,7 +14,9 @@ curl -v -k --proxy http://localhost:8080 https://www.example.com
 
 ### Perdefined clients and versions
 
-> for full list, see: https://github.com/refraction-networking/utls/blob/master/u_common.go
+Please note that certain preconfigured fingerprints can significantly alter the application layer interactions. If the corresponding configuration is not present on the client side, it may result in connection errors.
+
+For example, newer versions of Chrome require the server to use HTTP/2. If you are testing with tools like curl, you should include the ``--http2`` parameter to accommodate the corresponding behavior.
 
 | Client | Version |
 | ------ | ------- |
@@ -39,6 +41,8 @@ curl -v -k --proxy http://localhost:8080 https://www.example.com
 | Safari | 16.0 |
 | 360Browser | 7.5 |
 | QQBrowser | 11.1 |
+
+> for full list, see: https://github.com/refraction-networking/utls/blob/master/u_common.go
 
 ## Contribution
 
