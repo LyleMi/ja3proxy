@@ -12,11 +12,27 @@ make
 curl -v -k --proxy http://localhost:8080 https://www.example.com
 ```
 
+```bash
+Usage of ja3proxy:
+  -addr string
+        proxy listen host
+  -port string
+        proxy listen port (default "8080")
+  -cert string
+        proxy tls cert (default "cert.pem")
+  -key string
+        proxy tls key (default "key.pem")
+  -client string
+        utls client (default "Golang")
+  -version string
+        utls client version (default "0")
+  -debug
+        enable debug
+```
+
 ### Perdefined clients and versions
 
-Please note that certain preconfigured fingerprints can significantly alter the application layer interactions. If the corresponding configuration is not present on the client side, it may result in connection errors.
-
-For example, newer versions of Chrome require the server to use HTTP/2. If you are testing with tools like curl, you should include the ``--http2`` parameter to accommodate the corresponding behavior.
+> for full list, see: https://github.com/refraction-networking/utls/blob/master/u_common.go
 
 | Client | Version |
 | ------ | ------- |
@@ -41,8 +57,6 @@ For example, newer versions of Chrome require the server to use HTTP/2. If you a
 | Safari | 16.0 |
 | 360Browser | 7.5 |
 | QQBrowser | 11.1 |
-
-> for full list, see: https://github.com/refraction-networking/utls/blob/master/u_common.go
 
 ## Contribution
 

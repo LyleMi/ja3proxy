@@ -15,21 +15,14 @@ import (
 	utls "github.com/refraction-networking/utls"
 )
 
-var (
-	cert       string
-	key        string
-	tlsClient  string
-	tlsVersion string
-)
-
 func fileExists(filename string) bool {
 	_, err := os.Stat(filename)
 	return !os.IsNotExist(err)
 }
 
-func customTLSWrap(conn net.Conn, sni string) (net.Conn, error) {
+func customTLSWrap(conn net.Conn, sni string) (*utls.UConn, error) {
 	clientHelloID := utls.ClientHelloID{
-		tlsClient, tlsVersion, nil, nil,
+		Config.TLSClient, Config.TLSVersion, nil, nil,
 	}
 
 	uTLSConn := utls.UClient(
@@ -43,6 +36,7 @@ func customTLSWrap(conn net.Conn, sni string) (net.Conn, error) {
 	if err := uTLSConn.Handshake(); err != nil {
 		return nil, err
 	}
+
 	return uTLSConn, nil
 }
 
@@ -92,17 +86,25 @@ func connect(sni string, destConn net.Conn, clientConn net.Conn) {
 		return
 	}
 
-	cert, err := tls.LoadX509KeyPair(cert, key)
+	cert, err := tls.LoadX509KeyPair(Config.Cert, Config.Key)
 	if err != nil {
 		log.Fatal(err)
 	}
 
+	config := &tls.Config{
+		InsecureSkipVerify: true,
+		Certificates:       []tls.Certificate{cert},
+	}
+
+	state := destTLSConn.ConnectionState()
+	protocols := state.NegotiatedProtocol
+
+	if protocols == "h2" {
+		config.NextProtos = []string{"h2", "http/1.1"}
+	}
 	clientTLSConn := tls.Server(
 		clientConn,
-		&tls.Config{
-			InsecureSkipVerify: true,
-			Certificates:       []tls.Certificate{cert},
-		},
+		config,
 	)
 	err = clientTLSConn.Handshake()
 	if err != nil {
@@ -110,7 +112,11 @@ func connect(sni string, destConn net.Conn, clientConn net.Conn) {
 		return
 	}
 
-	junction(destTLSConn, clientTLSConn)
+	if Config.Debug {
+		debugJunction(destTLSConn, clientTLSConn)
+	} else {
+		junction(destTLSConn, clientTLSConn)
+	}
 }
 
 func junction(destConn net.Conn, clientConn net.Conn) {
@@ -144,26 +150,22 @@ func copyHeader(dst, src http.Header) {
 }
 
 func main() {
-	var (
-		addr string
-		port string
-	)
-	flag.StringVar(&cert, "cert", "cert.pem", "proxy tls cert")
-	flag.StringVar(&key, "key", "key.pem", "proxy tls key")
-	flag.StringVar(&addr, "addr", "", "proxy host")
-	flag.StringVar(&port, "port", "8080", "proxy port")
-	flag.StringVar(&tlsClient, "client", "Golang", "utls client")
-	flag.StringVar(&tlsVersion, "version", "0", "utls client version")
+	flag.StringVar(&Config.Cert, "cert", "cert.pem", "proxy tls cert")
+	flag.StringVar(&Config.Key, "key", "key.pem", "proxy tls key")
+	flag.StringVar(&Config.Addr, "addr", "", "proxy listen host")
+	flag.StringVar(&Config.Port, "port", "8080", "proxy listen port")
+	flag.StringVar(&Config.TLSClient, "client", "Golang", "utls client")
+	flag.StringVar(&Config.TLSVersion, "version", "0", "utls client version")
+	flag.BoolVar(&Config.Debug, "debug", false, "enable debug")
 	flag.Parse()
 
-	if !fileExists(cert) || !fileExists(key) {
+	if !fileExists(Config.Cert) || !fileExists(Config.Key) {
 		log.Println("cert not exists, generate")
-		cert = ""
 		generateCertificate()
 	}
 
 	server := &http.Server{
-		Addr: addr + ":" + port,
+		Addr: Config.Addr + ":" + Config.Port,
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == http.MethodConnect {
 				handleTunneling(w, r)
@@ -173,7 +175,10 @@ func main() {
 		}),
 	}
 
-	fmt.Println("HTTP Proxy Server started at localhost Port:" + port)
+	fmt.Printf(
+		"HTTP Proxy Server listen at %s:%s, with tls fingerprint %s %s\n",
+		Config.Addr, Config.Port, Config.TLSVersion, Config.TLSClient,
+	)
 	err := server.ListenAndServe()
 	if err != nil {
 		log.Fatal(err)
