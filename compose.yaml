@@ -1,0 +1,20 @@
+services:
+  ja3proxy:
+    image: ghcr.io/lylemi/ja3proxy:latest
+    build: .
+    entrypoint:
+      [
+        "/app/ja3proxy",
+        "-cert",
+        "/app/credentials/cert.pem",
+        "-key",
+        "/app/credentials/key.pem",
+        "-client",
+        "360Browser",
+        "-version",
+        "7.5"
+      ]
+    ports:
+      - 8080:8080
+    volumes:
+      - ./credentials:/app/credentials
