@@ -160,8 +160,16 @@ func main() {
 	flag.Parse()
 
 	if !fileExists(Config.Cert) || !fileExists(Config.Key) {
-		log.Println("cert not exists, generate")
-		generateCertificate()
+		if fileExists(Config.Cert) {
+			log.Println("found cert, but no corresponding key")
+			os.Exit(-1)
+		} else if fileExists(Config.Key) {
+			log.Println("found key, but no corresponding cert")
+			os.Exit(-1)
+		}
+
+		log.Println("cert and key do not exist, generating")
+		generateCertificate(Config.Cert, Config.Key)
 	}
 
 	server := &http.Server{
