@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-func generateCertificate(certPath, keyPath string) error {
+func generateCertificate() error {
 	priv, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		return err
@@ -35,14 +35,14 @@ func generateCertificate(certPath, keyPath string) error {
 		return err
 	}
 
-	certOut, err := os.Create(certPath)
+	certOut, err := os.Create(Config.Cert)
 	if err != nil {
 		return err
 	}
 	defer certOut.Close()
 	pem.Encode(certOut, &pem.Block{Type: "CERTIFICATE", Bytes: derBytes})
 
-	keyOut, err := os.OpenFile(keyPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+	keyOut, err := os.OpenFile(Config.Key, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
 	if err != nil {
 		return err
 	}

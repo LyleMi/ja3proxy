@@ -169,7 +169,7 @@ func main() {
 		}
 
 		log.Println("cert and key do not exist, generating")
-		generateCertificate(Config.Cert, Config.Key)
+		generateCertificate()
 	}
 
 	server := &http.Server{
