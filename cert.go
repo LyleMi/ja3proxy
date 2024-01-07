@@ -3,9 +3,11 @@ package main
 import (
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"log"
 	"math/big"
 	"os"
 	"time"
@@ -50,3 +52,16 @@ func generateCertificate() error {
 	pem.Encode(keyOut, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(priv)})
 	return nil
 }
+
+func loadCertificate() {
+	cert, err := tls.LoadX509KeyPair(Config.Cert, Config.Key)
+	if err != nil {
+		log.Fatal(err)
+	} else {
+		LoadedCert = cert
+	}
+}
+
+var (
+	LoadedCert tls.Certificate
+)
