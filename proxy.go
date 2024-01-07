@@ -22,7 +22,7 @@ func fileExists(filename string) bool {
 
 func customTLSWrap(conn net.Conn, sni string) (*utls.UConn, error) {
 	clientHelloID := utls.ClientHelloID{
-		Config.TLSClient, Config.TLSVersion, nil, nil,
+		Client: Config.TLSClient, Version: Config.TLSVersion, Seed: nil, Weights: nil,
 	}
 
 	uTLSConn := utls.UClient(
@@ -86,14 +86,9 @@ func connect(sni string, destConn net.Conn, clientConn net.Conn) {
 		return
 	}
 
-	cert, err := tls.LoadX509KeyPair(Config.Cert, Config.Key)
-	if err != nil {
-		log.Fatal(err)
-	}
-
 	config := &tls.Config{
 		InsecureSkipVerify: true,
-		Certificates:       []tls.Certificate{cert},
+		Certificates:       []tls.Certificate{LoadedCert},
 	}
 
 	state := destTLSConn.ConnectionState()
@@ -171,6 +166,8 @@ func main() {
 		log.Println("cert and key do not exist, generating")
 		generateCertificate()
 	}
+
+	loadCertificate()
 
 	server := &http.Server{
 		Addr: Config.Addr + ":" + Config.Port,
