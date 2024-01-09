@@ -2,7 +2,10 @@ module github.com/lylemi/ja3proxy
 
 go 1.20
 
-require github.com/refraction-networking/utls v1.3.2
+require (
+	github.com/refraction-networking/utls v1.3.2
+	golang.org/x/net v0.7.0
+)
 
 require (
 	github.com/andybalholm/brotli v1.0.4 // indirect

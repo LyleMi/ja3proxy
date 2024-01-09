@@ -52,6 +52,8 @@ Usage of ja3proxy:
         utls client (default "Golang")
   -version string
         utls client version (default "0")
+  -upstream string
+        upstream proxy, e.g. 127.0.0.1:1080, socks5 only
   -debug
         enable debug
 ```

@@ -1,5 +1,9 @@
 package main
 
+import (
+	"crypto/tls"
+)
+
 type RunningConfig struct {
 	Debug      bool
 	Addr       string
@@ -8,8 +12,11 @@ type RunningConfig struct {
 	TLSClient  string
 	Cert       string
 	Key        string
+	Upstream   string
 }
 
 var (
-	Config RunningConfig
+	Config       RunningConfig
+	LoadedCert   tls.Certificate
+	CustomDialer *UpstreamDialer
 )

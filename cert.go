@@ -61,7 +61,3 @@ func loadCertificate() {
 		LoadedCert = cert
 	}
 }
-
-var (
-	LoadedCert tls.Certificate
-)
