@@ -1,7 +1,9 @@
 package main
 
 import (
+	"crypto/ecdsa"
 	"crypto/tls"
+	"crypto/x509"
 )
 
 type RunningConfig struct {
@@ -15,8 +17,19 @@ type RunningConfig struct {
 	Upstream   string
 }
 
+type CertificateAuthority struct {
+	tlsCert  tls.Certificate
+	x509Cert *x509.Certificate
+}
+
+type SessionKeyHelper struct {
+	privateKey *ecdsa.PrivateKey
+	PEMBlock   []byte
+}
+
 var (
 	Config       RunningConfig
-	LoadedCert   tls.Certificate
 	CustomDialer *UpstreamDialer
+	CA           CertificateAuthority
+	SessionKey   SessionKeyHelper
 )

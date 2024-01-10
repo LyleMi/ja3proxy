@@ -45,7 +45,7 @@ func handleTunneling(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
-		log.Println("Tunneling err", err)
+		log.Println("Tunneling err: ", err)
 		return
 	}
 	w.WriteHeader(http.StatusOK)
@@ -59,7 +59,7 @@ func handleTunneling(w http.ResponseWriter, r *http.Request) {
 	clientConn, _, err := hijacker.Hijack()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
-		log.Println("Hijack error", err)
+		log.Println("Hijack error: ", err)
 	}
 	go connect(strings.Split(r.Host, ":")[0], destConn, clientConn)
 }
@@ -82,13 +82,18 @@ func connect(sni string, destConn net.Conn, clientConn net.Conn) {
 	defer clientConn.Close()
 	destTLSConn, err := customTLSWrap(destConn, sni)
 	if err != nil {
-		fmt.Println("TLS handshake failed:", err)
+		fmt.Println("TLS handshake failed: ", err)
 		return
+	}
+
+	tlsCert, err := generateCertificate(sni)
+	if err != nil {
+		fmt.Println("Error generating certificate: ", err)
 	}
 
 	config := &tls.Config{
 		InsecureSkipVerify: true,
-		Certificates:       []tls.Certificate{LoadedCert},
+		Certificates:       []tls.Certificate{tlsCert},
 	}
 
 	state := destTLSConn.ConnectionState()
@@ -103,7 +108,7 @@ func connect(sni string, destConn net.Conn, clientConn net.Conn) {
 	)
 	err = clientTLSConn.Handshake()
 	if err != nil {
-		log.Println("Failed to perform TLS handshake:", err)
+		log.Println("Failed to perform TLS handshake: ", err)
 		return
 	}
 
@@ -120,7 +125,7 @@ func junction(destConn net.Conn, clientConn net.Conn) {
 	go func() {
 		_, err := io.Copy(destConn, clientConn)
 		if err != nil {
-			log.Println("copy dest to client error", err)
+			log.Println("copy dest to client error: ", err)
 		}
 		chDone <- true
 	}()
@@ -128,7 +133,7 @@ func junction(destConn net.Conn, clientConn net.Conn) {
 	go func() {
 		_, err := io.Copy(clientConn, destConn)
 		if err != nil {
-			log.Println("copy client to dest error", err)
+			log.Println("copy client to dest error: ", err)
 		}
 		chDone <- true
 	}()
