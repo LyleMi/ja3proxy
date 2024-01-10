@@ -7,11 +7,17 @@ import (
 	"net/http"
 	"os"
 	"time"
+
+	cflog "github.com/cloudflare/cfssl/log"
 )
 
+func init() {
+	cflog.Level = cflog.LevelWarning
+}
+
 func main() {
-	flag.StringVar(&Config.Cert, "cert", "cert.pem", "proxy tls cert")
-	flag.StringVar(&Config.Key, "key", "key.pem", "proxy tls key")
+	flag.StringVar(&Config.Cert, "cert", "cert.pem", "proxy CA cert")
+	flag.StringVar(&Config.Key, "key", "key.pem", "proxy CA key")
 	flag.StringVar(&Config.Addr, "addr", "", "proxy listen host")
 	flag.StringVar(&Config.Port, "port", "8080", "proxy listen port")
 	flag.StringVar(&Config.TLSClient, "client", "Golang", "utls client")
@@ -20,20 +26,28 @@ func main() {
 	flag.BoolVar(&Config.Debug, "debug", false, "enable debug")
 	flag.Parse()
 
+	if Config.Debug {
+		cflog.Level = cflog.LevelDebug
+	}
+
 	if !fileExists(Config.Cert) || !fileExists(Config.Key) {
 		if fileExists(Config.Cert) {
-			log.Println("found cert, but no corresponding key")
+			log.Println("found CA cert, but no corresponding key")
 			os.Exit(-1)
 		} else if fileExists(Config.Key) {
-			log.Println("found key, but no corresponding cert")
+			log.Println("found CA key, but no corresponding cert")
 			os.Exit(-1)
 		}
 
-		log.Println("cert and key do not exist, generating")
-		generateCertificate()
+		log.Println("CA cert and key do not exist, generating")
+		err := generateCA()
+		if err != nil {
+			log.Fatal("Failed generating CA", err)
+		}
 	}
 
-	loadCertificate()
+	loadExistingCA()
+	generateSessionKey()
 
 	var err error
 	CustomDialer, err = NewUpstreamDialer(Config.Upstream, time.Second*10)
