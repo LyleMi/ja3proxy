@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"time"
 
 	utls "github.com/refraction-networking/utls"
 )
@@ -41,7 +40,9 @@ func customTLSWrap(conn net.Conn, sni string) (*utls.UConn, error) {
 
 func handleTunneling(w http.ResponseWriter, r *http.Request) {
 	log.Printf("proxy to %s", r.Host)
-	destConn, err := net.DialTimeout("tcp", r.Host, 10*time.Second)
+
+	destConn, err := CustomDialer.Dial("tcp", r.Host)
+
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		log.Println("Tunneling err", err)
