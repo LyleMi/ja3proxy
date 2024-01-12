@@ -2,6 +2,7 @@ package main
 
 import (
 	"net"
+	"net/http"
 	"net/url"
 	"time"
 
@@ -28,6 +29,13 @@ func NewUpstreamDialer(socksAddr string, timeout time.Duration) (*UpstreamDialer
 			return nil, err
 		}
 		dialer = socksDialer
+
+		// set upstream proxy for http connections
+		defaultTransport := http.DefaultTransport.(*http.Transport).Clone()
+		defaultTransport.Proxy = func(req *http.Request) (*url.URL, error) {
+			return parsedURL, nil
+		}
+		http.DefaultTransport = defaultTransport
 	} else {
 		dialer = &net.Dialer{Timeout: timeout}
 	}
