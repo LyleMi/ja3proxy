@@ -2,6 +2,7 @@ package main
 
 import (
 	"net"
+	"net/url"
 	"time"
 
 	"golang.org/x/net/proxy"
@@ -15,7 +16,14 @@ func NewUpstreamDialer(socksAddr string, timeout time.Duration) (*UpstreamDialer
 	var dialer proxy.Dialer
 
 	if socksAddr != "" {
-		socksDialer, err := proxy.SOCKS5("tcp", socksAddr, nil, proxy.Direct)
+		parsedURL, err := url.Parse(socksAddr)
+		user := parsedURL.User.Username()
+		password, _ := parsedURL.User.Password()
+		socksDialer, err := proxy.SOCKS5(
+			"tcp", parsedURL.Host,
+			&proxy.Auth{User: user, Password: password},
+			proxy.Direct,
+		)
 		if err != nil {
 			return nil, err
 		}
