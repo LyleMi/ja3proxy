@@ -24,7 +24,7 @@ func (writer DebugWriter) Write(data []byte) (n int, err error) {
 }
 
 func debugJunction(destConn net.Conn, clientConn net.Conn) {
-	chDone := make(chan bool)
+	chDone := make(chan bool, 2)
 
 	go func() {
 		defer func() {
@@ -60,5 +60,7 @@ func debugJunction(destConn net.Conn, clientConn net.Conn) {
 		}
 	}()
 
+	// wait for both copy ops to complete
+	<-chDone
 	<-chDone
 }
