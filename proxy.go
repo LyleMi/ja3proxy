@@ -120,7 +120,7 @@ func connect(sni string, destConn net.Conn, clientConn net.Conn) {
 }
 
 func junction(destConn net.Conn, clientConn net.Conn) {
-	chDone := make(chan bool)
+	chDone := make(chan bool, 2)
 
 	go func() {
 		_, err := io.Copy(destConn, clientConn)
@@ -138,6 +138,8 @@ func junction(destConn net.Conn, clientConn net.Conn) {
 		chDone <- true
 	}()
 
+	// wait for both copy ops to complete
+	<-chDone
 	<-chDone
 }
 
