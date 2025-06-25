@@ -22,7 +22,7 @@ func main() {
 	flag.StringVar(&Config.Port, "port", "8080", "proxy listen port")
 	flag.StringVar(&Config.TLSClient, "client", "Golang", "utls client")
 	flag.StringVar(&Config.TLSVersion, "version", "0", "utls client version")
-	flag.StringVar(&Config.Upstream, "upstream", "", "upstream proxy, e.g. 127.0.0.1:1080, socks5 only")
+	flag.StringVar(&Config.Upstream, "upstream", "", "upstream proxy, e.g. http://user:pass@host:port or socks5://user:pass@host:port")
 	flag.BoolVar(&Config.Debug, "debug", false, "enable debug")
 	flag.Parse()
 

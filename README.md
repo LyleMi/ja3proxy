@@ -53,10 +53,35 @@ Usage of ja3proxy:
   -version string
         utls client version (default "0")
   -upstream string
-        upstream proxy, e.g. 127.0.0.1:1080, socks5 only
+        upstream proxy, e.g. http://user:pass@host:port or socks5://user:pass@host:port
   -debug
         enable debug
 ```
+
+### Dynamic Proxy Configuration via Headers
+
+You can configure proxy settings per request using HTTP headers:
+
+```bash
+# Set timeout to 15 seconds
+curl -H "tls-timeout: 15" --proxy http://localhost:8080 https://www.example.com
+
+# Use specific proxy for this request
+curl -H "tls-proxy: http://127.0.0.1:1080" --proxy http://localhost:8080 https://www.example.com
+
+# Force HTTPS upgrade (HTTP requests will be upgraded to HTTPS)
+curl -H "tls-https: true" --proxy http://localhost:8080 http://www.example.com
+
+# Combine multiple settings
+curl -H "tls-timeout: 20" -H "tls-proxy: socks5://127.0.0.1:1080" -H "tls-https: true" --proxy http://localhost:8080 http://www.example.com
+```
+
+**Header Parameters:**
+- `tls-timeout`: Timeout in seconds for proxy requests (default: 10)
+- `tls-proxy`: Proxy URL for this request (supports http:// and socks5://)
+- `tls-https`: Force HTTPS upgrade for HTTP requests (set to "true")
+
+**Note:** These headers are automatically removed before forwarding requests to target servers.
 
 ### Perdefined clients and versions
 

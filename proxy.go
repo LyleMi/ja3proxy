@@ -7,8 +7,10 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	utls "github.com/refraction-networking/utls"
 )
@@ -41,8 +43,21 @@ func customTLSWrap(conn net.Conn, sni string) (*utls.UConn, error) {
 func handleTunneling(w http.ResponseWriter, r *http.Request) {
 	log.Printf("proxy to %s", r.Host)
 
-	destConn, err := CustomDialer.Dial("tcp", r.Host)
+	// 解析请求头中的代理配置
+	proxyConfig := parseRequestProxyConfig(r)
+	
+	// 去除自定义请求头，避免传递给目标服务器
+	cleanCustomHeaders(r)
+	
+	// 创建动态拨号器
+	dialer, err := createDynamicDialer(proxyConfig)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		log.Println("Failed to create dynamic dialer: ", err)
+		return
+	}
 
+	destConn, err := dialer.Dial("tcp", r.Host)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		log.Println("Tunneling err: ", err)
@@ -65,7 +80,22 @@ func handleTunneling(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleHTTP(w http.ResponseWriter, req *http.Request) {
-	resp, err := http.DefaultTransport.RoundTrip(req)
+	// 解析请求头中的代理配置
+	proxyConfig := parseRequestProxyConfig(req)
+	
+	// 去除自定义请求头，避免传递给目标服务器
+	cleanCustomHeaders(req)
+	
+	// 处理强制HTTPS升级
+	if proxyConfig.ForceHTTPS && req.URL.Scheme == "http" {
+		req.URL.Scheme = "https"
+		req.URL.Host = req.Host
+	}
+	
+	// 创建自定义传输器
+	transport := createCustomTransport(proxyConfig)
+	
+	resp, err := transport.RoundTrip(req)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		log.Println(err)
@@ -149,4 +179,50 @@ func copyHeader(dst, src http.Header) {
 			dst.Add(k, v)
 		}
 	}
+}
+
+// createDynamicDialer 根据请求配置创建动态拨号器
+func createDynamicDialer(config *RequestProxyConfig) (proxy.Dialer, error) {
+	if config.ProxyURL == "" {
+		// 使用默认拨号器，需要包装成 proxy.Dialer 接口
+		return &net.Dialer{Timeout: config.Timeout}, nil
+	}
+	
+	// 创建代理拨号器
+	dialer, err := NewUpstreamDialer(config.ProxyURL, config.Timeout)
+	if err != nil {
+		return nil, err
+	}
+	
+	return dialer, nil
+}
+
+// createCustomTransport 根据请求配置创建自定义传输器
+func createCustomTransport(config *RequestProxyConfig) *http.Transport {
+	transport := &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   config.Timeout,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          100,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: true, // 忽略证书验证
+		},
+	}
+	
+	// 如果指定了代理，设置代理
+	if config.ProxyURL != "" {
+		if proxyURL, err := url.Parse(config.ProxyURL); err == nil {
+			transport.Proxy = http.ProxyURL(proxyURL)
+		} else if Config.Debug {
+			log.Printf("Failed to parse proxy URL %s: %v, using default proxy", config.ProxyURL, err)
+		}
+	}
+	
+	return transport
 }
