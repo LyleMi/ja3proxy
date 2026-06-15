@@ -18,24 +18,85 @@ func fileExists(filename string) bool {
 	return !os.IsNotExist(err)
 }
 
-func customTLSWrap(conn net.Conn, sni string) (*utls.UConn, error) {
+func customTLSWrap(conn net.Conn, sni string, nextProtos []string) (*utls.UConn, error) {
 	clientHelloID := utls.ClientHelloID{
 		Client: Config.TLSClient, Version: Config.TLSVersion, Seed: nil, Weights: nil,
 	}
 
+	tlsConfig := &utls.Config{
+		ServerName:         sni,
+		InsecureSkipVerify: true,
+		NextProtos:         nextProtos,
+	}
 	uTLSConn := utls.UClient(
 		conn,
-		&utls.Config{
-			ServerName:         sni,
-			InsecureSkipVerify: true,
-		},
+		tlsConfig,
 		clientHelloID,
 	)
+
+	if len(nextProtos) > 0 && clientHelloID.Client != utls.HelloGolang.Client {
+		spec, err := utls.UTLSIdToSpec(clientHelloID)
+		if err == nil {
+			limitSpecALPN(&spec, nextProtos)
+			uTLSConn = utls.UClient(conn, tlsConfig, utls.HelloCustom)
+			if err := uTLSConn.ApplyPreset(&spec); err != nil {
+				return nil, err
+			}
+		}
+	}
+
 	if err := uTLSConn.Handshake(); err != nil {
 		return nil, err
 	}
 
 	return uTLSConn, nil
+}
+
+func limitSpecALPN(spec *utls.ClientHelloSpec, nextProtos []string) {
+	extensions := make([]utls.TLSExtension, 0, len(spec.Extensions)+1)
+	for _, extension := range spec.Extensions {
+		switch ext := extension.(type) {
+		case *utls.ALPNExtension:
+			ext.AlpnProtocols = nextProtos
+			extensions = append(extensions, extension)
+		case *utls.ApplicationSettingsExtension:
+			ext.SupportedProtocols = matchingProtocols(ext.SupportedProtocols, nextProtos)
+			if len(ext.SupportedProtocols) > 0 {
+				extensions = append(extensions, extension)
+			}
+		default:
+			extensions = append(extensions, extension)
+		}
+	}
+
+	spec.Extensions = extensions
+}
+
+func matchingProtocols(supported []string, allowed []string) []string {
+	matches := make([]string, 0, len(supported))
+	for _, protocol := range supported {
+		for _, allowedProtocol := range allowed {
+			if protocol == allowedProtocol {
+				matches = append(matches, protocol)
+				break
+			}
+		}
+	}
+	return matches
+}
+
+func upstreamALPN(clientProtocols []string) []string {
+	if len(clientProtocols) == 0 {
+		return []string{"http/1.1"}
+	}
+	return clientProtocols
+}
+
+func clientALPN(upstreamProtocol string) []string {
+	if upstreamProtocol != "" {
+		return []string{upstreamProtocol}
+	}
+	return []string{"http/1.1"}
 }
 
 func handleTunneling(w http.ResponseWriter, r *http.Request) {
@@ -80,11 +141,7 @@ func handleHTTP(w http.ResponseWriter, req *http.Request) {
 func connect(sni string, destConn net.Conn, clientConn net.Conn) {
 	defer destConn.Close()
 	defer clientConn.Close()
-	destTLSConn, err := customTLSWrap(destConn, sni)
-	if err != nil {
-		fmt.Println("TLS handshake failed: ", err)
-		return
-	}
+	var destTLSConn *utls.UConn
 
 	tlsCert, err := generateCertificate(sni)
 	if err != nil {
@@ -94,14 +151,20 @@ func connect(sni string, destConn net.Conn, clientConn net.Conn) {
 	config := &tls.Config{
 		InsecureSkipVerify: true,
 		Certificates:       []tls.Certificate{tlsCert},
+		GetConfigForClient: func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
+			destTLSConn, err = customTLSWrap(destConn, sni, upstreamALPN(hello.SupportedProtos))
+			if err != nil {
+				return nil, err
+			}
+
+			return &tls.Config{
+				InsecureSkipVerify: true,
+				Certificates:       []tls.Certificate{tlsCert},
+				NextProtos:         clientALPN(destTLSConn.ConnectionState().NegotiatedProtocol),
+			}, nil
+		},
 	}
 
-	state := destTLSConn.ConnectionState()
-	protocols := state.NegotiatedProtocol
-
-	if protocols == "h2" {
-		config.NextProtos = []string{"h2", "http/1.1"}
-	}
 	clientTLSConn := tls.Server(
 		clientConn,
 		config,
@@ -109,6 +172,11 @@ func connect(sni string, destConn net.Conn, clientConn net.Conn) {
 	err = clientTLSConn.Handshake()
 	if err != nil {
 		log.Println("Failed to perform TLS handshake: ", err)
+		return
+	}
+
+	if destTLSConn == nil {
+		log.Println("Failed to establish upstream TLS connection")
 		return
 	}
 
