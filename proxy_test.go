@@ -1,8 +1,15 @@
 package main
 
 import (
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"errors"
 	"io"
+	"math/big"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -128,6 +135,170 @@ func TestLimitSpecALPN(t *testing.T) {
 	if !reflect.DeepEqual(alpn.AlpnProtocols, []string{"http/1.1"}) {
 		t.Fatalf("ALPN protocols = %v, want [http/1.1]", alpn.AlpnProtocols)
 	}
+}
+
+func TestCustomTLSWrapHandshakeNegotiatesALPNAndSNI(t *testing.T) {
+	oldConfig := Config
+	Config.TLSClient = utls.HelloGolang.Client
+	Config.TLSVersion = utls.HelloGolang.Version
+	t.Cleanup(func() {
+		Config = oldConfig
+	})
+
+	const serverName = "upstream.test"
+	nextProtos := []string{"h2", "http/1.1"}
+	listener, serverResults := newLocalTLSServer(t, []string{"h2", "http/1.1"})
+
+	conn, err := net.DialTimeout("tcp", listener.Addr().String(), 2*time.Second)
+	if err != nil {
+		t.Fatalf("dial local TLS server: %v", err)
+	}
+	if err := conn.SetDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatalf("set client deadline: %v", err)
+	}
+
+	tlsConn, err := customTLSWrap(conn, serverName, nextProtos)
+	if err != nil {
+		conn.Close()
+		t.Fatalf("customTLSWrap() error = %v", err)
+	}
+	defer tlsConn.Close()
+
+	state := tlsConn.ConnectionState()
+	if state.NegotiatedProtocol != "h2" {
+		t.Fatalf("client negotiated protocol = %q, want h2", state.NegotiatedProtocol)
+	}
+
+	result := receiveTLSServerResult(t, serverResults)
+	if result.err != nil {
+		t.Fatalf("server handshake error = %v", result.err)
+	}
+	if result.serverName != serverName {
+		t.Fatalf("server saw SNI = %q, want %q", result.serverName, serverName)
+	}
+	if result.negotiatedProtocol != "h2" {
+		t.Fatalf("server negotiated protocol = %q, want h2", result.negotiatedProtocol)
+	}
+	if !reflect.DeepEqual(result.supportedProtos, nextProtos) {
+		t.Fatalf("server saw client ALPN = %v, want %v", result.supportedProtos, nextProtos)
+	}
+}
+
+type tlsServerResult struct {
+	serverName         string
+	supportedProtos    []string
+	negotiatedProtocol string
+	err                error
+}
+
+func newLocalTLSServer(t *testing.T, nextProtos []string) (net.Listener, <-chan tlsServerResult) {
+	t.Helper()
+
+	cert := localTLSCertificate(t)
+	results := make(chan tlsServerResult, 1)
+	helloInfo := make(chan struct {
+		serverName      string
+		supportedProtos []string
+	}, 1)
+
+	baseListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen on local TCP address: %v", err)
+	}
+	t.Cleanup(func() {
+		baseListener.Close()
+	})
+
+	if tcpListener, ok := baseListener.(*net.TCPListener); ok {
+		if err := tcpListener.SetDeadline(time.Now().Add(2 * time.Second)); err != nil {
+			t.Fatalf("set listener deadline: %v", err)
+		}
+	}
+
+	tlsListener := tls.NewListener(baseListener, &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		NextProtos:   nextProtos,
+		GetConfigForClient: func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
+			helloInfo <- struct {
+				serverName      string
+				supportedProtos []string
+			}{
+				serverName:      hello.ServerName,
+				supportedProtos: append([]string(nil), hello.SupportedProtos...),
+			}
+			return nil, nil
+		},
+	})
+
+	go func() {
+		conn, err := tlsListener.Accept()
+		if err != nil {
+			results <- tlsServerResult{err: err}
+			return
+		}
+		defer conn.Close()
+		if err := conn.SetDeadline(time.Now().Add(2 * time.Second)); err != nil {
+			results <- tlsServerResult{err: err}
+			return
+		}
+
+		tlsConn := conn.(*tls.Conn)
+		err = tlsConn.Handshake()
+		result := tlsServerResult{err: err}
+		if err == nil {
+			info := <-helloInfo
+			result.serverName = info.serverName
+			result.supportedProtos = info.supportedProtos
+			result.negotiatedProtocol = tlsConn.ConnectionState().NegotiatedProtocol
+		}
+		results <- result
+	}()
+
+	return tlsListener, results
+}
+
+func receiveTLSServerResult(t *testing.T, results <-chan tlsServerResult) tlsServerResult {
+	t.Helper()
+
+	select {
+	case result := <-results:
+		return result
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for local TLS server")
+	}
+	return tlsServerResult{}
+}
+
+func localTLSCertificate(t *testing.T) tls.Certificate {
+	t.Helper()
+
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate test TLS key: %v", err)
+	}
+
+	template := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: "localhost"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(time.Hour),
+		KeyUsage:     x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		DNSNames:     []string{"upstream.test"},
+	}
+	certDER, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	if err != nil {
+		t.Fatalf("create test TLS certificate: %v", err)
+	}
+	keyDER := x509.MarshalPKCS1PrivateKey(key)
+
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: keyDER})
+	cert, err := tls.X509KeyPair(certPEM, keyPEM)
+	if err != nil {
+		t.Fatalf("parse test TLS certificate: %v", err)
+	}
+	return cert
 }
 
 func TestCopyHeader(t *testing.T) {
