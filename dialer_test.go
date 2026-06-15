@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"testing"
@@ -24,6 +26,74 @@ func TestNewUpstreamDialerDirect(t *testing.T) {
 	}
 	if netDialer.Timeout != timeout {
 		t.Fatalf("net.Dialer timeout = %v, want %v", netDialer.Timeout, timeout)
+	}
+}
+
+func TestUpstreamDialerDialLocalTCP(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	serverErr := make(chan error, 1)
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			serverErr <- err
+			return
+		}
+		defer conn.Close()
+		if err := conn.SetDeadline(time.Now().Add(2 * time.Second)); err != nil {
+			serverErr <- err
+			return
+		}
+
+		buf := make([]byte, len("ping"))
+		if _, err := io.ReadFull(conn, buf); err != nil {
+			serverErr <- err
+			return
+		}
+		if string(buf) != "ping" {
+			serverErr <- fmt.Errorf("payload = %q, want %q", buf, "ping")
+			return
+		}
+		_, err = conn.Write([]byte("pong"))
+		serverErr <- err
+	}()
+
+	upstream, err := NewUpstreamDialer("", time.Second)
+	if err != nil {
+		t.Fatalf("NewUpstreamDialer() error = %v", err)
+	}
+
+	conn, err := upstream.Dial("tcp", listener.Addr().String())
+	if err != nil {
+		t.Fatalf("Dial() error = %v", err)
+	}
+	defer conn.Close()
+	if err := conn.SetDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatalf("set deadline: %v", err)
+	}
+
+	if _, err := conn.Write([]byte("ping")); err != nil {
+		t.Fatalf("write to server: %v", err)
+	}
+	got := make([]byte, len("pong"))
+	if _, err := io.ReadFull(conn, got); err != nil {
+		t.Fatalf("read from server: %v", err)
+	}
+	if string(got) != "pong" {
+		t.Fatalf("response = %q, want pong", got)
+	}
+
+	select {
+	case err := <-serverErr:
+		if err != nil {
+			t.Fatalf("server error: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("server timed out")
 	}
 }
 
