@@ -1,12 +1,32 @@
 package main
 
 import (
+	"errors"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 
 	utls "github.com/refraction-networking/utls"
 )
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func replaceDefaultTransport(t *testing.T, rt http.RoundTripper) {
+	t.Helper()
+
+	original := http.DefaultTransport
+	http.DefaultTransport = rt
+	t.Cleanup(func() {
+		http.DefaultTransport = original
+	})
+}
 
 func TestMatchingProtocols(t *testing.T) {
 	tests := []struct {
@@ -103,5 +123,81 @@ func TestCopyHeader(t *testing.T) {
 	}
 	if got := dst.Get("Content-Type"); got != "text/plain" {
 		t.Fatalf("copied Content-Type = %q, want text/plain", got)
+	}
+}
+
+func TestHandleHTTPWritesUpstreamResponse(t *testing.T) {
+	var upstreamReq *http.Request
+	replaceDefaultTransport(t, roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		upstreamReq = req
+		return &http.Response{
+			StatusCode: http.StatusAccepted,
+			Header: http.Header{
+				"Content-Type": {"text/plain"},
+				"Set-Cookie":   {"a=1", "b=2"},
+				"X-Test":       {"ok"},
+			},
+			Body: io.NopCloser(strings.NewReader("proxied body")),
+		}, nil
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "http://example.com/resource", nil)
+	req.RequestURI = "http://example.com/resource"
+	rec := httptest.NewRecorder()
+
+	handleHTTP(rec, req)
+
+	resp := rec.Result()
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("status code = %d, want %d", resp.StatusCode, http.StatusAccepted)
+	}
+	if got := resp.Header.Get("Content-Type"); got != "text/plain" {
+		t.Fatalf("Content-Type = %q, want text/plain", got)
+	}
+	if got := resp.Header.Values("Set-Cookie"); !reflect.DeepEqual(got, []string{"a=1", "b=2"}) {
+		t.Fatalf("Set-Cookie values = %v, want [a=1 b=2]", got)
+	}
+	if got := resp.Header.Get("X-Test"); got != "ok" {
+		t.Fatalf("X-Test = %q, want ok", got)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read response body: %v", err)
+	}
+	if got := string(body); got != "proxied body" {
+		t.Fatalf("body = %q, want proxied body", got)
+	}
+	if upstreamReq == nil {
+		t.Fatal("RoundTrip was not called")
+	}
+	if upstreamReq.RequestURI != "" {
+		t.Fatalf("upstream RequestURI = %q, want empty", upstreamReq.RequestURI)
+	}
+}
+
+func TestHandleHTTPRoundTripErrorReturnsServiceUnavailable(t *testing.T) {
+	replaceDefaultTransport(t, roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return nil, errors.New("upstream unavailable")
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "http://example.com/resource", nil)
+	rec := httptest.NewRecorder()
+
+	handleHTTP(rec, req)
+
+	resp := rec.Result()
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("status code = %d, want %d", resp.StatusCode, http.StatusServiceUnavailable)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read response body: %v", err)
+	}
+	if !strings.Contains(string(body), "upstream unavailable") {
+		t.Fatalf("body = %q, want upstream error", string(body))
 	}
 }
