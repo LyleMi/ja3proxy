@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/tls"
@@ -373,6 +374,184 @@ func TestJunctionForwardsBothDirections(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("junction did not return after peer connections closed")
 	}
+}
+
+func TestHandleTunnelingDialErrorReturnsServiceUnavailable(t *testing.T) {
+	replaceTunnelDial(t, func(network, addr string) (net.Conn, error) {
+		if network != "tcp" {
+			t.Fatalf("network = %q, want tcp", network)
+		}
+		if addr != "example.com:443" {
+			t.Fatalf("addr = %q, want example.com:443", addr)
+		}
+		return nil, errors.New("dial failed")
+	})
+
+	clientConn, clientPeer := net.Pipe()
+	defer clientConn.Close()
+	defer clientPeer.Close()
+
+	rec := &hijackResponseRecorder{
+		ResponseRecorder: httptest.NewRecorder(),
+		conn:             clientConn,
+	}
+	req := httptest.NewRequest(http.MethodConnect, "http://example.com:443", nil)
+	req.Host = "example.com:443"
+
+	handleTunneling(rec, req)
+
+	resp := rec.Result()
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("status code = %d, want %d", resp.StatusCode, http.StatusServiceUnavailable)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read response body: %v", err)
+	}
+	if !strings.Contains(string(body), "dial failed") {
+		t.Fatalf("body = %q, want dial error", string(body))
+	}
+	if rec.hijacked {
+		t.Fatal("Hijack was called after dial failure")
+	}
+}
+
+func TestHandleTunnelingWithoutHijackerReturnsInternalServerError(t *testing.T) {
+	replaceTunnelDial(t, func(network, addr string) (net.Conn, error) {
+		t.Fatal("tunnelDial should not be called without Hijacker support")
+		return nil, nil
+	})
+
+	req := httptest.NewRequest(http.MethodConnect, "http://example.com:443", nil)
+	req.Host = "example.com:443"
+	rec := httptest.NewRecorder()
+
+	handleTunneling(rec, req)
+
+	resp := rec.Result()
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status code = %d, want %d", resp.StatusCode, http.StatusInternalServerError)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read response body: %v", err)
+	}
+	if !strings.Contains(string(body), "Hijacking not supported") {
+		t.Fatalf("body = %q, want hijacking error", string(body))
+	}
+}
+
+func TestHandleTunnelingSuccessDialsHijacksAndConnects(t *testing.T) {
+	destConn, destPeer := net.Pipe()
+	clientConn, clientPeer := net.Pipe()
+	defer destConn.Close()
+	defer destPeer.Close()
+	defer clientConn.Close()
+	defer clientPeer.Close()
+
+	var dialNetwork, dialAddr string
+	replaceTunnelDial(t, func(network, addr string) (net.Conn, error) {
+		dialNetwork = network
+		dialAddr = addr
+		return destConn, nil
+	})
+
+	connectCalls := make(chan tunnelConnectCall, 1)
+	replaceTunnelConnect(t, func(sni string, destConn net.Conn, clientConn net.Conn) {
+		connectCalls <- tunnelConnectCall{
+			sni:        sni,
+			destConn:   destConn,
+			clientConn: clientConn,
+		}
+	})
+
+	rec := &hijackResponseRecorder{
+		ResponseRecorder: httptest.NewRecorder(),
+		conn:             clientConn,
+	}
+	req := httptest.NewRequest(http.MethodConnect, "http://example.com:443", nil)
+	req.Host = "example.com:443"
+
+	handleTunneling(rec, req)
+
+	if dialNetwork != "tcp" {
+		t.Fatalf("dial network = %q, want tcp", dialNetwork)
+	}
+	if dialAddr != "example.com:443" {
+		t.Fatalf("dial addr = %q, want example.com:443", dialAddr)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status code = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if !reflect.DeepEqual(rec.events, []string{"writeHeader", "hijack"}) {
+		t.Fatalf("events = %v, want [writeHeader hijack]", rec.events)
+	}
+
+	var call tunnelConnectCall
+	select {
+	case call = <-connectCalls:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for tunnelConnect")
+	}
+
+	if call.sni != "example.com" {
+		t.Fatalf("connect sni = %q, want example.com", call.sni)
+	}
+	if call.destConn != destConn {
+		t.Fatalf("connect destConn = %p, want %p", call.destConn, destConn)
+	}
+	if call.clientConn != clientConn {
+		t.Fatalf("connect clientConn = %p, want %p", call.clientConn, clientConn)
+	}
+}
+
+type tunnelConnectCall struct {
+	sni        string
+	destConn   net.Conn
+	clientConn net.Conn
+}
+
+type hijackResponseRecorder struct {
+	*httptest.ResponseRecorder
+	conn     net.Conn
+	hijacked bool
+	events   []string
+}
+
+func (r *hijackResponseRecorder) WriteHeader(code int) {
+	r.events = append(r.events, "writeHeader")
+	r.ResponseRecorder.WriteHeader(code)
+}
+
+func (r *hijackResponseRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	r.hijacked = true
+	r.events = append(r.events, "hijack")
+	rw := bufio.NewReadWriter(bufio.NewReader(r.conn), bufio.NewWriter(r.conn))
+	return r.conn, rw, nil
+}
+
+func replaceTunnelDial(t *testing.T, dial func(network, addr string) (net.Conn, error)) {
+	t.Helper()
+
+	original := tunnelDial
+	tunnelDial = dial
+	t.Cleanup(func() {
+		tunnelDial = original
+	})
+}
+
+func replaceTunnelConnect(t *testing.T, connect func(sni string, destConn net.Conn, clientConn net.Conn)) {
+	t.Helper()
+
+	original := tunnelConnect
+	tunnelConnect = connect
+	t.Cleanup(func() {
+		tunnelConnect = original
+	})
 }
 
 func TestHandleHTTPWritesUpstreamResponse(t *testing.T) {

@@ -102,7 +102,14 @@ func clientALPN(upstreamProtocol string) []string {
 func handleTunneling(w http.ResponseWriter, r *http.Request) {
 	log.Printf("proxy to %s", r.Host)
 
-	destConn, err := CustomDialer.Dial("tcp", r.Host)
+	hijacker, ok := w.(http.Hijacker)
+	if !ok {
+		http.Error(w, "Hijacking not supported", http.StatusInternalServerError)
+		log.Println("Hijacking not supported")
+		return
+	}
+
+	destConn, err := tunnelDial("tcp", r.Host)
 
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
@@ -111,19 +118,20 @@ func handleTunneling(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusOK)
 
-	hijacker, ok := w.(http.Hijacker)
-	if !ok {
-		http.Error(w, "Hijacking not supported", http.StatusInternalServerError)
-		log.Println("Hijacking not supported")
-		return
-	}
 	clientConn, _, err := hijacker.Hijack()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		log.Println("Hijack error: ", err)
+		return
 	}
-	go connect(strings.Split(r.Host, ":")[0], destConn, clientConn)
+	go tunnelConnect(strings.Split(r.Host, ":")[0], destConn, clientConn)
 }
+
+var tunnelDial = func(network, addr string) (net.Conn, error) {
+	return CustomDialer.Dial(network, addr)
+}
+
+var tunnelConnect = connect
 
 func handleHTTP(w http.ResponseWriter, req *http.Request) {
 	outReq := req.Clone(req.Context())
