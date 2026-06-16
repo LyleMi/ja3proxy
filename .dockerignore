@@ -11,6 +11,10 @@
 # Output of the go coverage tool, specifically when used with LiteIDE
 *.out
 
+# Local build and coverage artifacts
+bin/
+coverage/
+
 # Go workspace file
 go.work
 
