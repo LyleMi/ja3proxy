@@ -34,8 +34,9 @@ func fileExists(filename string) bool {
 }
 
 func customTLSWrap(conn net.Conn, sni string, nextProtos []string) (*utls.UConn, error) {
+	fingerprint := configuredTLSFingerprint()
 	clientHelloID := utls.ClientHelloID{
-		Client: Config.TLSClient, Version: Config.TLSVersion, Seed: nil, Weights: nil,
+		Client: fingerprint.Client, Version: fingerprint.Version, Seed: nil, Weights: nil,
 	}
 
 	tlsConfig := &utls.Config{

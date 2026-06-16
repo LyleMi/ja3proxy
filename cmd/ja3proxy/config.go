@@ -7,14 +7,15 @@ import (
 )
 
 type RunningConfig struct {
-	Debug      bool
-	Addr       string
-	Port       string
-	TLSVersion string
-	TLSClient  string
-	Cert       string
-	Key        string
-	Upstream   string
+	Debug             bool
+	Addr              string
+	Port              string
+	TLSVersion        string
+	TLSClient         string
+	FingerprintConfig string
+	Cert              string
+	Key               string
+	Upstream          string
 }
 
 type CertificateAuthority struct {

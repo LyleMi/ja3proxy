@@ -92,6 +92,8 @@ Usage of ja3proxy:
         utls client (default "Golang")
   -version string
         utls client version (default "0")
+  -fingerprint-config string
+        JSON file to hot-reload utls client/version
   -upstream string
         upstream proxy, e.g. 127.0.0.1:1080, socks5 only
   -debug
@@ -110,6 +112,29 @@ Example with a SOCKS5 upstream proxy:
 
 The `-upstream` flag also accepts `host:port`, for example
 `127.0.0.1:1080`. Only SOCKS5 upstream proxies are supported.
+
+### Hot-reload TLS fingerprints
+
+Use `-fingerprint-config` to load the uTLS fingerprint from a JSON file and
+watch it for changes:
+
+```json
+{
+  "client": "Chrome",
+  "version": "106"
+}
+```
+
+Start the proxy with the file:
+
+```bash
+./ja3proxy -port 8080 -fingerprint-config fingerprint.json
+```
+
+When the file changes, JA3Proxy validates and reloads it. New HTTPS `CONNECT`
+connections use the latest fingerprint; existing TLS tunnels keep the
+fingerprint they were opened with. If a reload fails, the previous fingerprint
+stays active and the error is logged.
 
 ## TLS fingerprints
 
@@ -131,6 +156,21 @@ Common presets:
 | Safari | 16.0 |
 | 360Browser | 7.5 |
 | QQBrowser | 11.1 |
+
+## Updating uTLS
+
+The uTLS library is compiled into the JA3Proxy binary, so updating it requires a
+rebuild. Dependabot is configured to open weekly pull requests for Go module
+updates, including `github.com/refraction-networking/utls`. Those pull requests
+run the Go CI workflow before they are merged.
+
+To update manually:
+
+```bash
+go get github.com/refraction-networking/utls@latest
+go mod tidy
+go test ./...
+```
 
 ## Certificates
 
