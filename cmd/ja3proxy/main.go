@@ -56,7 +56,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	proxy := defaultProxy()
+	proxy := NewProxy(CustomDialer.Dial, tunnelConnect, CustomDialer.Transport)
 	server := &http.Server{
 		Addr:    Config.Addr + ":" + Config.Port,
 		Handler: proxy,

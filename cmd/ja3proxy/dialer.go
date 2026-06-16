@@ -12,11 +12,13 @@ import (
 )
 
 type UpstreamDialer struct {
-	dialer proxy.Dialer
+	dialer    proxy.Dialer
+	Transport http.RoundTripper
 }
 
 func NewUpstreamDialer(socksAddr string, timeout time.Duration) (*UpstreamDialer, error) {
 	var dialer proxy.Dialer
+	var transport http.RoundTripper = http.DefaultTransport
 
 	if socksAddr != "" {
 		parsedURL, err := parseSocksURL(socksAddr)
@@ -35,17 +37,19 @@ func NewUpstreamDialer(socksAddr string, timeout time.Duration) (*UpstreamDialer
 		}
 		dialer = socksDialer
 
-		// set upstream proxy for http connections
 		defaultTransport := http.DefaultTransport.(*http.Transport).Clone()
 		defaultTransport.Proxy = func(req *http.Request) (*url.URL, error) {
 			return parsedURL, nil
 		}
-		HTTPTransport = defaultTransport
+		transport = defaultTransport
 	} else {
 		dialer = &net.Dialer{Timeout: timeout}
 	}
 
-	return &UpstreamDialer{dialer: dialer}, nil
+	return &UpstreamDialer{
+		dialer:    dialer,
+		Transport: transport,
+	}, nil
 }
 
 func parseSocksURL(socksAddr string) (*url.URL, error) {

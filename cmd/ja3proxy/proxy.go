@@ -117,7 +117,7 @@ func NewProxy(
 		connect = tunnelConnect
 	}
 	if transport == nil {
-		transport = HTTPTransport
+		transport = http.DefaultTransport
 	}
 	return &Proxy{
 		Dial:      dial,
@@ -127,7 +127,7 @@ func NewProxy(
 }
 
 func defaultProxy() *Proxy {
-	return NewProxy(tunnelDial, tunnelConnect, HTTPTransport)
+	return NewProxy(tunnelDial, tunnelConnect, http.DefaultTransport)
 }
 
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -157,7 +157,7 @@ func (p *Proxy) transport() http.RoundTripper {
 	if p != nil && p.Transport != nil {
 		return p.Transport
 	}
-	return HTTPTransport
+	return http.DefaultTransport
 }
 
 func (p *Proxy) handleTunneling(w http.ResponseWriter, r *http.Request) {
@@ -198,8 +198,6 @@ var tunnelDial = func(network, addr string) (net.Conn, error) {
 }
 
 var tunnelConnect = connect
-
-var HTTPTransport http.RoundTripper = http.DefaultTransport
 
 func (p *Proxy) handleHTTP(w http.ResponseWriter, req *http.Request) {
 	outReq := req.Clone(req.Context())

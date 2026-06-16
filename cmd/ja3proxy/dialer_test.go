@@ -27,6 +27,9 @@ func TestNewUpstreamDialerDirect(t *testing.T) {
 	if netDialer.Timeout != timeout {
 		t.Fatalf("net.Dialer timeout = %v, want %v", netDialer.Timeout, timeout)
 	}
+	if upstream.Transport != http.DefaultTransport {
+		t.Fatalf("upstream.Transport = %T, want http.DefaultTransport", upstream.Transport)
+	}
 }
 
 func TestUpstreamDialerDialLocalTCP(t *testing.T) {
@@ -112,11 +115,6 @@ func TestNewUpstreamDialerSocksURLValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			oldTransport := HTTPTransport
-			t.Cleanup(func() {
-				HTTPTransport = oldTransport
-			})
-
 			upstream, err := NewUpstreamDialer(tt.socksAddr, time.Second)
 			if tt.wantErr {
 				if err == nil {
@@ -134,14 +132,11 @@ func TestNewUpstreamDialerSocksURLValidation(t *testing.T) {
 	}
 }
 
-func TestNewUpstreamDialerReadmeSocksAddressSetsHTTPTransportProxy(t *testing.T) {
-	oldHTTPTransport := HTTPTransport
+func TestNewUpstreamDialerReadmeSocksAddressSetsTransportProxy(t *testing.T) {
 	oldDefaultTransport := http.DefaultTransport
-	t.Cleanup(func() {
-		HTTPTransport = oldHTTPTransport
-	})
 
-	if _, err := NewUpstreamDialer("127.0.0.1:1080", time.Second); err != nil {
+	upstream, err := NewUpstreamDialer("127.0.0.1:1080", time.Second)
+	if err != nil {
 		t.Fatalf("NewUpstreamDialer() error = %v", err)
 	}
 
@@ -149,9 +144,9 @@ func TestNewUpstreamDialerReadmeSocksAddressSetsHTTPTransportProxy(t *testing.T)
 		t.Fatal("http.DefaultTransport was modified")
 	}
 
-	transport, ok := HTTPTransport.(*http.Transport)
+	transport, ok := upstream.Transport.(*http.Transport)
 	if !ok {
-		t.Fatalf("HTTPTransport = %T, want *http.Transport", HTTPTransport)
+		t.Fatalf("upstream.Transport = %T, want *http.Transport", upstream.Transport)
 	}
 	proxyURL, err := transport.Proxy(&http.Request{})
 	if err != nil {

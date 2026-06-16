@@ -30,16 +30,6 @@ func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return f(req)
 }
 
-func replaceHTTPTransport(t *testing.T, rt http.RoundTripper) {
-	t.Helper()
-
-	original := HTTPTransport
-	HTTPTransport = rt
-	t.Cleanup(func() {
-		HTTPTransport = original
-	})
-}
-
 func TestMatchingProtocols(t *testing.T) {
 	tests := []struct {
 		name      string
