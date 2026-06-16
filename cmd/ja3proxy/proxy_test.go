@@ -757,7 +757,25 @@ func TestHandleTunnelingSuccessDialsHijacksAndConnects(t *testing.T) {
 	req := httptest.NewRequest(http.MethodConnect, "http://example.com:443", nil)
 	req.Host = "example.com:443"
 
-	proxy.ServeHTTP(rec, req)
+	serveDone := make(chan struct{})
+	go func() {
+		proxy.ServeHTTP(rec, req)
+		close(serveDone)
+	}()
+
+	response := make([]byte, len(connectEstablishedResponse))
+	if _, err := io.ReadFull(clientPeer, response); err != nil {
+		t.Fatalf("read CONNECT response: %v", err)
+	}
+	if string(response) != connectEstablishedResponse {
+		t.Fatalf("CONNECT response = %q, want %q", response, connectEstablishedResponse)
+	}
+
+	select {
+	case <-serveDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("ServeHTTP did not return after CONNECT response was read")
+	}
 
 	if dialNetwork != "tcp" {
 		t.Fatalf("dial network = %q, want tcp", dialNetwork)
@@ -768,8 +786,8 @@ func TestHandleTunnelingSuccessDialsHijacksAndConnects(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status code = %d, want %d", rec.Code, http.StatusOK)
 	}
-	if !reflect.DeepEqual(rec.events, []string{"writeHeader", "hijack"}) {
-		t.Fatalf("events = %v, want [writeHeader hijack]", rec.events)
+	if !reflect.DeepEqual(rec.events, []string{"hijack"}) {
+		t.Fatalf("events = %v, want [hijack]", rec.events)
 	}
 
 	var call tunnelConnectCall
@@ -788,6 +806,85 @@ func TestHandleTunnelingSuccessDialsHijacksAndConnects(t *testing.T) {
 	if call.clientConn != clientConn {
 		t.Fatalf("connect clientConn = %p, want %p", call.clientConn, clientConn)
 	}
+}
+
+func TestHandleTunnelingWritesPlainConnectResponse(t *testing.T) {
+	destConn, destPeer := net.Pipe()
+	defer destConn.Close()
+	defer destPeer.Close()
+
+	connectStarted := make(chan struct{})
+	releaseConnect := make(chan struct{})
+	proxy := NewProxy(func(network, addr string) (net.Conn, error) {
+		if network != "tcp" {
+			t.Fatalf("network = %q, want tcp", network)
+		}
+		if addr != "example.com:443" {
+			t.Fatalf("addr = %q, want example.com:443", addr)
+		}
+		return destConn, nil
+	}, func(sni string, destConn net.Conn, clientConn net.Conn) {
+		close(connectStarted)
+		<-releaseConnect
+		destConn.Close()
+		clientConn.Close()
+	}, nil)
+
+	server := httptest.NewServer(proxy)
+	defer server.Close()
+
+	serverURL := strings.TrimPrefix(server.URL, "http://")
+	conn, err := net.DialTimeout("tcp", serverURL, 2*time.Second)
+	if err != nil {
+		t.Fatalf("dial proxy: %v", err)
+	}
+	defer conn.Close()
+	if err := conn.SetDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatalf("set proxy connection deadline: %v", err)
+	}
+
+	if _, err := io.WriteString(conn, "CONNECT example.com:443 HTTP/1.1\r\nHost: example.com:443\r\n\r\n"); err != nil {
+		t.Fatalf("write CONNECT request: %v", err)
+	}
+
+	reader := bufio.NewReader(conn)
+	statusLine, err := reader.ReadString('\n')
+	if err != nil {
+		t.Fatalf("read CONNECT status line: %v", err)
+	}
+	if statusLine != "HTTP/1.1 200 Connection Established\r\n" {
+		t.Fatalf("CONNECT status line = %q, want Connection Established", statusLine)
+	}
+
+	headers := http.Header{}
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			t.Fatalf("read CONNECT header: %v", err)
+		}
+		if line == "\r\n" {
+			break
+		}
+		parts := strings.SplitN(strings.TrimRight(line, "\r\n"), ":", 2)
+		if len(parts) != 2 {
+			t.Fatalf("malformed CONNECT header line %q", line)
+		}
+		headers.Add(parts[0], strings.TrimSpace(parts[1]))
+	}
+
+	if got := headers.Get("Transfer-Encoding"); got != "" {
+		t.Fatalf("Transfer-Encoding = %q, want empty", got)
+	}
+	if got := headers.Get("Content-Length"); got != "" {
+		t.Fatalf("Content-Length = %q, want empty", got)
+	}
+
+	select {
+	case <-connectStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("CONNECT handler did not start tunnel")
+	}
+	close(releaseConnect)
 }
 
 func TestHandleTunnelingHijackErrorClosesDestination(t *testing.T) {

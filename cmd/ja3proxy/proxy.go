@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"crypto/tls"
 	"fmt"
 	"io"
@@ -12,6 +13,20 @@ import (
 
 	utls "github.com/refraction-networking/utls"
 )
+
+const connectEstablishedResponse = "HTTP/1.1 200 Connection Established\r\n\r\n"
+
+type bufferedReadConn struct {
+	net.Conn
+	reader *bufio.Reader
+}
+
+func (conn *bufferedReadConn) Read(p []byte) (int, error) {
+	if conn.reader.Buffered() > 0 {
+		return conn.reader.Read(p)
+	}
+	return conn.Conn.Read(p)
+}
 
 func fileExists(filename string) bool {
 	_, err := os.Stat(filename)
@@ -177,16 +192,37 @@ func (p *Proxy) handleTunneling(w http.ResponseWriter, r *http.Request) {
 		log.Println("Tunneling err: ", err)
 		return
 	}
-	w.WriteHeader(http.StatusOK)
 
-	clientConn, _, err := hijacker.Hijack()
+	clientConn, clientRW, err := hijacker.Hijack()
 	if err != nil {
 		destConn.Close()
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		log.Println("Hijack error: ", err)
 		return
 	}
-	go p.connect(strings.Split(r.Host, ":")[0], destConn, clientConn)
+
+	tunnelClientConn := clientConn
+	if clientRW.Reader.Buffered() > 0 {
+		tunnelClientConn = &bufferedReadConn{
+			Conn:   clientConn,
+			reader: clientRW.Reader,
+		}
+	}
+
+	if _, err := io.WriteString(clientRW, connectEstablishedResponse); err != nil {
+		destConn.Close()
+		clientConn.Close()
+		log.Println("CONNECT response write error: ", err)
+		return
+	}
+	if err := clientRW.Flush(); err != nil {
+		destConn.Close()
+		clientConn.Close()
+		log.Println("CONNECT response flush error: ", err)
+		return
+	}
+
+	go p.connect(strings.Split(r.Host, ":")[0], destConn, tunnelClientConn)
 }
 
 func handleTunneling(w http.ResponseWriter, r *http.Request) {
