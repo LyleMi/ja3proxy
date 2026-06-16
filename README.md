@@ -48,7 +48,7 @@ Test the proxy:
 curl -v -k --proxy http://127.0.0.1:8080 https://www.example.com
 ```
 
-The first run creates `cert.pem` and `key.pem` in the working directory if they
+The first run creates `credentials/cert.pem` and `credentials/key.pem` if they
 do not already exist.
 
 ### Docker
@@ -83,9 +83,9 @@ Usage of ja3proxy:
   -port string
         proxy listen port (default "8080")
   -cert string
-        proxy CA cert (default "cert.pem")
+        proxy CA cert (default "credentials/cert.pem")
   -key string
-        proxy CA key (default "key.pem")
+        proxy CA key (default "credentials/key.pem")
   -client string
         utls client (default "Golang")
   -version string
@@ -138,6 +138,10 @@ certificates for HTTPS interception.
 - If both files exist, they are loaded from `-cert` and `-key`.
 - If neither file exists, JA3Proxy generates a new CA pair.
 - If only one file exists, startup fails to avoid using a mismatched pair.
+
+By default, generated CA files are written to `credentials/cert.pem` and
+`credentials/key.pem`. If the configured paths include missing directories,
+JA3Proxy creates them before writing the files.
 
 For browser or application testing, import the generated CA certificate into the
 client trust store. For one-off command-line checks, tools such as `curl -k`

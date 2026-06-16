@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 
 	cfconfig "github.com/cloudflare/cfssl/config"
@@ -44,6 +45,9 @@ func generateCA() error {
 	CA.tlsCert = tlsCert
 	CA.x509Cert = x509Cert
 
+	if err := ensureParentDir(Config.Cert); err != nil {
+		return err
+	}
 	caOut, err := os.Create(Config.Cert)
 	if err != nil {
 		return err
@@ -54,6 +58,9 @@ func generateCA() error {
 		return err
 	}
 
+	if err := ensureParentDir(Config.Key); err != nil {
+		return err
+	}
 	keyOut, err := os.OpenFile(Config.Key, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
 	if err != nil {
 		return err
@@ -66,6 +73,14 @@ func generateCA() error {
 	}
 
 	return nil
+}
+
+func ensureParentDir(path string) error {
+	dir := filepath.Dir(path)
+	if dir == "." || dir == "" {
+		return nil
+	}
+	return os.MkdirAll(dir, 0700)
 }
 
 func generateSessionKey() error {

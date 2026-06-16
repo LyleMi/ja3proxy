@@ -153,3 +153,61 @@ func TestGenerateCAAndCertificate(t *testing.T) {
 		t.Fatalf("generated certificate DNSNames = %v, want [example.com]", leaf.DNSNames)
 	}
 }
+
+func TestGenerateCACreatesParentDirectories(t *testing.T) {
+	oldConfig := Config
+	oldCA := CA
+	t.Cleanup(func() {
+		Config = oldConfig
+		CA = oldCA
+	})
+
+	dir := t.TempDir()
+	Config.Cert = filepath.Join(dir, "credentials", "cert.pem")
+	Config.Key = filepath.Join(dir, "credentials", "key.pem")
+
+	if err := generateCA(); err != nil {
+		t.Fatalf("generateCA() error = %v", err)
+	}
+
+	if _, err := os.Stat(Config.Cert); err != nil {
+		t.Fatalf("expected generated CA cert file: %v", err)
+	}
+	if _, err := os.Stat(Config.Key); err != nil {
+		t.Fatalf("expected generated CA key file: %v", err)
+	}
+}
+
+func TestGenerateCAWithRootRelativePaths(t *testing.T) {
+	oldConfig := Config
+	oldCA := CA
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd() error = %v", err)
+	}
+	dir := t.TempDir()
+	t.Cleanup(func() {
+		Config = oldConfig
+		CA = oldCA
+		if err := os.Chdir(oldWd); err != nil {
+			t.Fatalf("Chdir(%q) error = %v", oldWd, err)
+		}
+	})
+
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("Chdir(%q) error = %v", dir, err)
+	}
+	Config.Cert = "cert.pem"
+	Config.Key = "key.pem"
+
+	if err := generateCA(); err != nil {
+		t.Fatalf("generateCA() error = %v", err)
+	}
+
+	if _, err := os.Stat("cert.pem"); err != nil {
+		t.Fatalf("expected generated root-relative CA cert file: %v", err)
+	}
+	if _, err := os.Stat("key.pem"); err != nil {
+		t.Fatalf("expected generated root-relative CA key file: %v", err)
+	}
+}

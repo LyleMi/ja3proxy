@@ -16,8 +16,8 @@ func init() {
 }
 
 func main() {
-	flag.StringVar(&Config.Cert, "cert", "cert.pem", "proxy CA cert")
-	flag.StringVar(&Config.Key, "key", "key.pem", "proxy CA key")
+	flag.StringVar(&Config.Cert, "cert", "credentials/cert.pem", "proxy CA cert")
+	flag.StringVar(&Config.Key, "key", "credentials/key.pem", "proxy CA key")
 	flag.StringVar(&Config.Addr, "addr", "", "proxy listen host")
 	flag.StringVar(&Config.Port, "port", "8080", "proxy listen port")
 	flag.StringVar(&Config.TLSClient, "client", "Golang", "utls client")
