@@ -22,4 +22,5 @@ go.work
 
 *.pem
 credentials
+bin/
 ja3proxy

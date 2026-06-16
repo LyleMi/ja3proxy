@@ -157,7 +157,7 @@ Build release binaries with the Makefile:
 make
 ```
 
-This creates Linux and Windows AMD64 binaries in the project root.
+This creates Linux and Windows AMD64 binaries in the `bin/` directory.
 
 ## Security notice
 

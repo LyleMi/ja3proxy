@@ -1,15 +1,19 @@
 .PHONY: all build-linux build-windows clean
 
 BINARY_NAME=ja3proxy
-BINARY_LINUX=$(BINARY_NAME)
-BINARY_WINDOWS=$(BINARY_NAME).exe
+BINARY_DIR=bin
+BINARY_LINUX=$(BINARY_DIR)/$(BINARY_NAME)
+BINARY_WINDOWS=$(BINARY_DIR)/$(BINARY_NAME).exe
 
 all: build-linux build-windows
 
-build-linux:
+$(BINARY_DIR):
+	mkdir -p $(BINARY_DIR)
+
+build-linux: $(BINARY_DIR)
 	GOOS=linux GOARCH=amd64 go build -o $(BINARY_LINUX)
 
-build-windows:
+build-windows: $(BINARY_DIR)
 	GOOS=windows GOARCH=amd64 go build -o $(BINARY_WINDOWS)
 
 clean:
