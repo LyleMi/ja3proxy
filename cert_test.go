@@ -18,6 +18,8 @@ func TestStripPort(t *testing.T) {
 		{name: "ipv4 with port", in: "127.0.0.1:8080", want: "127.0.0.1"},
 		{name: "ipv4 without port", in: "127.0.0.1", want: "127.0.0.1"},
 		{name: "bracketed ipv6 with port", in: "[2606:4700:4700::1111]:443", want: "2606:4700:4700::1111"},
+		{name: "bracketed ipv6 without port", in: "[2606:4700:4700::1111]", want: "2606:4700:4700::1111"},
+		{name: "ipv6 without port", in: "2606:4700:4700::1111", want: "2606:4700:4700::1111"},
 	}
 
 	for _, tt := range tests {
@@ -26,6 +28,63 @@ func TestStripPort(t *testing.T) {
 				t.Fatalf("stripPort(%q) = %q, want %q", tt.in, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestGenerateCertificateMissingSessionKeyReturnsError(t *testing.T) {
+	oldConfig := Config
+	oldCA := CA
+	oldSessionKey := SessionKey
+	t.Cleanup(func() {
+		Config = oldConfig
+		CA = oldCA
+		SessionKey = oldSessionKey
+	})
+
+	dir := t.TempDir()
+	Config.Cert = filepath.Join(dir, "ca.pem")
+	Config.Key = filepath.Join(dir, "ca-key.pem")
+
+	if err := generateCA(); err != nil {
+		t.Fatalf("generateCA() error = %v", err)
+	}
+	SessionKey = SessionKeyHelper{}
+
+	if _, err := generateCertificate("example.com:443"); err == nil {
+		t.Fatal("generateCertificate() error = nil, want missing session key error")
+	}
+}
+
+func TestGenerateCertificateMissingCAReturnsError(t *testing.T) {
+	oldCA := CA
+	oldSessionKey := SessionKey
+	t.Cleanup(func() {
+		CA = oldCA
+		SessionKey = oldSessionKey
+	})
+
+	CA = CertificateAuthority{}
+	if err := generateSessionKey(); err != nil {
+		t.Fatalf("generateSessionKey() error = %v", err)
+	}
+
+	if _, err := generateCertificate("example.com:443"); err == nil {
+		t.Fatal("generateCertificate() error = nil, want missing CA error")
+	}
+}
+
+func TestLoadExistingCAMissingFilesReturnsError(t *testing.T) {
+	oldConfig := Config
+	t.Cleanup(func() {
+		Config = oldConfig
+	})
+
+	dir := t.TempDir()
+	Config.Cert = filepath.Join(dir, "missing-ca.pem")
+	Config.Key = filepath.Join(dir, "missing-key.pem")
+
+	if err := loadExistingCA(); err == nil {
+		t.Fatal("loadExistingCA() error = nil, want missing file error")
 	}
 }
 

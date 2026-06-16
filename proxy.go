@@ -120,6 +120,7 @@ func handleTunneling(w http.ResponseWriter, r *http.Request) {
 
 	clientConn, _, err := hijacker.Hijack()
 	if err != nil {
+		destConn.Close()
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		log.Println("Hijack error: ", err)
 		return

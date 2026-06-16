@@ -162,3 +162,26 @@ func TestNewUpstreamDialerReadmeSocksAddressSetsHTTPProxy(t *testing.T) {
 		t.Fatalf("proxy URL host = %q, want 127.0.0.1:1080", proxyURL.Host)
 	}
 }
+
+func TestParseSocksURLPreservesAuthAndDefaultsScheme(t *testing.T) {
+	parsedURL, err := parseSocksURL("user:pass@127.0.0.1:1080")
+	if err != nil {
+		t.Fatalf("parseSocksURL() error = %v", err)
+	}
+	if parsedURL.Scheme != "socks5" {
+		t.Fatalf("scheme = %q, want socks5", parsedURL.Scheme)
+	}
+	if parsedURL.Host != "127.0.0.1:1080" {
+		t.Fatalf("host = %q, want 127.0.0.1:1080", parsedURL.Host)
+	}
+	if got := parsedURL.User.Username(); got != "user" {
+		t.Fatalf("username = %q, want user", got)
+	}
+	password, ok := parsedURL.User.Password()
+	if !ok {
+		t.Fatal("password missing")
+	}
+	if password != "pass" {
+		t.Fatalf("password = %q, want pass", password)
+	}
+}

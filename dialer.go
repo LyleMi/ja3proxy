@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"golang.org/x/net/proxy"
@@ -49,7 +50,7 @@ func NewUpstreamDialer(socksAddr string, timeout time.Duration) (*UpstreamDialer
 
 func parseSocksURL(socksAddr string) (*url.URL, error) {
 	parsedURL, err := url.Parse(socksAddr)
-	if err != nil || (parsedURL.Scheme == "" && parsedURL.Host == "") {
+	if err != nil || !strings.Contains(socksAddr, "://") {
 		parsedURL, err = url.Parse("socks5://" + socksAddr)
 		if err != nil {
 			return nil, err

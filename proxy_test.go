@@ -799,6 +799,26 @@ func TestHandleTunnelingSuccessDialsHijacksAndConnects(t *testing.T) {
 	}
 }
 
+func TestHandleTunnelingHijackErrorClosesDestination(t *testing.T) {
+	destConn := &closeTrackingConn{}
+	replaceTunnelDial(t, func(network, addr string) (net.Conn, error) {
+		return destConn, nil
+	})
+	replaceTunnelConnect(t, func(sni string, destConn net.Conn, clientConn net.Conn) {
+		t.Fatal("tunnelConnect should not be called after hijack failure")
+	})
+
+	rec := &failingHijackResponseRecorder{ResponseRecorder: httptest.NewRecorder()}
+	req := httptest.NewRequest(http.MethodConnect, "http://example.com:443", nil)
+	req.Host = "example.com:443"
+
+	handleTunneling(rec, req)
+
+	if !destConn.closed {
+		t.Fatal("destination connection was not closed after hijack failure")
+	}
+}
+
 type tunnelConnectCall struct {
 	sni        string
 	destConn   net.Conn
@@ -822,6 +842,24 @@ func (r *hijackResponseRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	r.events = append(r.events, "hijack")
 	rw := bufio.NewReadWriter(bufio.NewReader(r.conn), bufio.NewWriter(r.conn))
 	return r.conn, rw, nil
+}
+
+type failingHijackResponseRecorder struct {
+	*httptest.ResponseRecorder
+}
+
+func (r *failingHijackResponseRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	return nil, nil, errors.New("hijack failed")
+}
+
+type closeTrackingConn struct {
+	net.Conn
+	closed bool
+}
+
+func (conn *closeTrackingConn) Close() error {
+	conn.closed = true
+	return nil
 }
 
 func replaceTunnelDial(t *testing.T, dial func(network, addr string) (net.Conn, error)) {

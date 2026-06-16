@@ -8,6 +8,8 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
+	"fmt"
+	"net"
 	"os"
 	"strings"
 
@@ -87,30 +89,28 @@ func generateSessionKey() error {
 
 // Credit: elazarl/goproxy (https://github.com/elazarl/goproxy/blob/7cc037d33fb57d20c2fa7075adaf0e2d2862da78/https.go#L50)
 func stripPort(s string) string {
-	var ix int
-	if strings.Contains(s, "[") && strings.Contains(s, "]") {
-		//ipv6 : for example : [2606:4700:4700::1111]:443
-
-		//strip '[' and ']'
-		s = strings.ReplaceAll(s, "[", "")
-		s = strings.ReplaceAll(s, "]", "")
-
-		ix = strings.LastIndexAny(s, ":")
-		if ix == -1 {
-			return s
-		}
-	} else {
-		//ipv4
-		ix = strings.IndexRune(s, ':')
-		if ix == -1 {
-			return s
-		}
-
+	host, _, err := net.SplitHostPort(s)
+	if err == nil {
+		return host
 	}
-	return s[:ix]
+	if strings.HasPrefix(s, "[") && strings.HasSuffix(s, "]") {
+		return strings.TrimSuffix(strings.TrimPrefix(s, "["), "]")
+	}
+	return s
 }
 
 func generateCertificate(sni string) (tls.Certificate, error) {
+	if SessionKey.privateKey == nil || len(SessionKey.PEMBlock) == 0 {
+		return tls.Certificate{}, fmt.Errorf("session key has not been generated")
+	}
+	if CA.x509Cert == nil {
+		return tls.Certificate{}, fmt.Errorf("CA certificate has not been loaded")
+	}
+	cryptoSigner, ok := CA.tlsCert.PrivateKey.(crypto.Signer)
+	if !ok {
+		return tls.Certificate{}, fmt.Errorf("CA private key is not a crypto signer")
+	}
+
 	hostname := stripPort(sni)
 	request := &cfsr.CertificateRequest{
 		CN:         hostname,
@@ -123,7 +123,6 @@ func generateCertificate(sni string) (tls.Certificate, error) {
 		return tls.Certificate{}, err
 	}
 
-	cryptoSigner := CA.tlsCert.PrivateKey.(crypto.Signer)
 	profile := cfconfig.DefaultConfig()
 	policy := &cfconfig.Signing{
 		Default: profile,
