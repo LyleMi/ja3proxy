@@ -667,7 +667,7 @@ func TestJunctionForwardsBothDirections(t *testing.T) {
 }
 
 func TestHandleTunnelingDialErrorReturnsServiceUnavailable(t *testing.T) {
-	replaceTunnelDial(t, func(network, addr string) (net.Conn, error) {
+	proxy := NewProxy(func(network, addr string) (net.Conn, error) {
 		if network != "tcp" {
 			t.Fatalf("network = %q, want tcp", network)
 		}
@@ -675,7 +675,7 @@ func TestHandleTunnelingDialErrorReturnsServiceUnavailable(t *testing.T) {
 			t.Fatalf("addr = %q, want example.com:443", addr)
 		}
 		return nil, errors.New("dial failed")
-	})
+	}, nil, nil)
 
 	clientConn, clientPeer := net.Pipe()
 	defer clientConn.Close()
@@ -688,7 +688,7 @@ func TestHandleTunnelingDialErrorReturnsServiceUnavailable(t *testing.T) {
 	req := httptest.NewRequest(http.MethodConnect, "http://example.com:443", nil)
 	req.Host = "example.com:443"
 
-	handleTunneling(rec, req)
+	proxy.ServeHTTP(rec, req)
 
 	resp := rec.Result()
 	defer resp.Body.Close()
@@ -709,16 +709,16 @@ func TestHandleTunnelingDialErrorReturnsServiceUnavailable(t *testing.T) {
 }
 
 func TestHandleTunnelingWithoutHijackerReturnsInternalServerError(t *testing.T) {
-	replaceTunnelDial(t, func(network, addr string) (net.Conn, error) {
+	proxy := NewProxy(func(network, addr string) (net.Conn, error) {
 		t.Fatal("tunnelDial should not be called without Hijacker support")
 		return nil, nil
-	})
+	}, nil, nil)
 
 	req := httptest.NewRequest(http.MethodConnect, "http://example.com:443", nil)
 	req.Host = "example.com:443"
 	rec := httptest.NewRecorder()
 
-	handleTunneling(rec, req)
+	proxy.ServeHTTP(rec, req)
 
 	resp := rec.Result()
 	defer resp.Body.Close()
@@ -744,20 +744,21 @@ func TestHandleTunnelingSuccessDialsHijacksAndConnects(t *testing.T) {
 	defer clientPeer.Close()
 
 	var dialNetwork, dialAddr string
-	replaceTunnelDial(t, func(network, addr string) (net.Conn, error) {
+	dial := func(network, addr string) (net.Conn, error) {
 		dialNetwork = network
 		dialAddr = addr
 		return destConn, nil
-	})
+	}
 
 	connectCalls := make(chan tunnelConnectCall, 1)
-	replaceTunnelConnect(t, func(sni string, destConn net.Conn, clientConn net.Conn) {
+	connect := func(sni string, destConn net.Conn, clientConn net.Conn) {
 		connectCalls <- tunnelConnectCall{
 			sni:        sni,
 			destConn:   destConn,
 			clientConn: clientConn,
 		}
-	})
+	}
+	proxy := NewProxy(dial, connect, nil)
 
 	rec := &hijackResponseRecorder{
 		ResponseRecorder: httptest.NewRecorder(),
@@ -766,7 +767,7 @@ func TestHandleTunnelingSuccessDialsHijacksAndConnects(t *testing.T) {
 	req := httptest.NewRequest(http.MethodConnect, "http://example.com:443", nil)
 	req.Host = "example.com:443"
 
-	handleTunneling(rec, req)
+	proxy.ServeHTTP(rec, req)
 
 	if dialNetwork != "tcp" {
 		t.Fatalf("dial network = %q, want tcp", dialNetwork)
@@ -801,18 +802,17 @@ func TestHandleTunnelingSuccessDialsHijacksAndConnects(t *testing.T) {
 
 func TestHandleTunnelingHijackErrorClosesDestination(t *testing.T) {
 	destConn := &closeTrackingConn{}
-	replaceTunnelDial(t, func(network, addr string) (net.Conn, error) {
+	proxy := NewProxy(func(network, addr string) (net.Conn, error) {
 		return destConn, nil
-	})
-	replaceTunnelConnect(t, func(sni string, destConn net.Conn, clientConn net.Conn) {
+	}, func(sni string, destConn net.Conn, clientConn net.Conn) {
 		t.Fatal("tunnelConnect should not be called after hijack failure")
-	})
+	}, nil)
 
 	rec := &failingHijackResponseRecorder{ResponseRecorder: httptest.NewRecorder()}
 	req := httptest.NewRequest(http.MethodConnect, "http://example.com:443", nil)
 	req.Host = "example.com:443"
 
-	handleTunneling(rec, req)
+	proxy.ServeHTTP(rec, req)
 
 	if !destConn.closed {
 		t.Fatal("destination connection was not closed after hijack failure")
@@ -884,7 +884,7 @@ func replaceTunnelConnect(t *testing.T, connect func(sni string, destConn net.Co
 
 func TestHandleHTTPWritesUpstreamResponse(t *testing.T) {
 	var upstreamReq *http.Request
-	replaceHTTPTransport(t, roundTripFunc(func(req *http.Request) (*http.Response, error) {
+	proxy := NewProxy(nil, nil, roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		upstreamReq = req
 		return &http.Response{
 			StatusCode: http.StatusAccepted,
@@ -901,7 +901,7 @@ func TestHandleHTTPWritesUpstreamResponse(t *testing.T) {
 	req.RequestURI = "http://example.com/resource"
 	rec := httptest.NewRecorder()
 
-	handleHTTP(rec, req)
+	proxy.ServeHTTP(rec, req)
 
 	resp := rec.Result()
 	defer resp.Body.Close()
@@ -934,14 +934,14 @@ func TestHandleHTTPWritesUpstreamResponse(t *testing.T) {
 }
 
 func TestHandleHTTPRoundTripErrorReturnsServiceUnavailable(t *testing.T) {
-	replaceHTTPTransport(t, roundTripFunc(func(req *http.Request) (*http.Response, error) {
+	proxy := NewProxy(nil, nil, roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		return nil, errors.New("upstream unavailable")
 	}))
 
 	req := httptest.NewRequest(http.MethodGet, "http://example.com/resource", nil)
 	rec := httptest.NewRecorder()
 
-	handleHTTP(rec, req)
+	proxy.ServeHTTP(rec, req)
 
 	resp := rec.Result()
 	defer resp.Body.Close()

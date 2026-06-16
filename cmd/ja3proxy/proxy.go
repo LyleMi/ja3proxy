@@ -99,7 +99,68 @@ func clientALPN(upstreamProtocol string) []string {
 	return []string{"http/1.1"}
 }
 
-func handleTunneling(w http.ResponseWriter, r *http.Request) {
+type Proxy struct {
+	Dial      func(network, addr string) (net.Conn, error)
+	Connect   func(sni string, destConn net.Conn, clientConn net.Conn)
+	Transport http.RoundTripper
+}
+
+func NewProxy(
+	dial func(network, addr string) (net.Conn, error),
+	connect func(sni string, destConn net.Conn, clientConn net.Conn),
+	transport http.RoundTripper,
+) *Proxy {
+	if dial == nil {
+		dial = tunnelDial
+	}
+	if connect == nil {
+		connect = tunnelConnect
+	}
+	if transport == nil {
+		transport = HTTPTransport
+	}
+	return &Proxy{
+		Dial:      dial,
+		Connect:   connect,
+		Transport: transport,
+	}
+}
+
+func defaultProxy() *Proxy {
+	return NewProxy(tunnelDial, tunnelConnect, HTTPTransport)
+}
+
+func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodConnect {
+		p.handleTunneling(w, r)
+		return
+	}
+	p.handleHTTP(w, r)
+}
+
+func (p *Proxy) dial(network, addr string) (net.Conn, error) {
+	if p != nil && p.Dial != nil {
+		return p.Dial(network, addr)
+	}
+	return tunnelDial(network, addr)
+}
+
+func (p *Proxy) connect(sni string, destConn net.Conn, clientConn net.Conn) {
+	if p != nil && p.Connect != nil {
+		p.Connect(sni, destConn, clientConn)
+		return
+	}
+	tunnelConnect(sni, destConn, clientConn)
+}
+
+func (p *Proxy) transport() http.RoundTripper {
+	if p != nil && p.Transport != nil {
+		return p.Transport
+	}
+	return HTTPTransport
+}
+
+func (p *Proxy) handleTunneling(w http.ResponseWriter, r *http.Request) {
 	log.Printf("proxy to %s", r.Host)
 
 	hijacker, ok := w.(http.Hijacker)
@@ -109,7 +170,7 @@ func handleTunneling(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	destConn, err := tunnelDial("tcp", r.Host)
+	destConn, err := p.dial("tcp", r.Host)
 
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
@@ -125,7 +186,11 @@ func handleTunneling(w http.ResponseWriter, r *http.Request) {
 		log.Println("Hijack error: ", err)
 		return
 	}
-	go tunnelConnect(strings.Split(r.Host, ":")[0], destConn, clientConn)
+	go p.connect(strings.Split(r.Host, ":")[0], destConn, clientConn)
+}
+
+func handleTunneling(w http.ResponseWriter, r *http.Request) {
+	defaultProxy().handleTunneling(w, r)
 }
 
 var tunnelDial = func(network, addr string) (net.Conn, error) {
@@ -136,11 +201,11 @@ var tunnelConnect = connect
 
 var HTTPTransport http.RoundTripper = http.DefaultTransport
 
-func handleHTTP(w http.ResponseWriter, req *http.Request) {
+func (p *Proxy) handleHTTP(w http.ResponseWriter, req *http.Request) {
 	outReq := req.Clone(req.Context())
 	outReq.RequestURI = ""
 
-	resp, err := HTTPTransport.RoundTrip(outReq)
+	resp, err := p.transport().RoundTrip(outReq)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		log.Println(err)
@@ -150,6 +215,10 @@ func handleHTTP(w http.ResponseWriter, req *http.Request) {
 	copyHeader(w.Header(), resp.Header)
 	w.WriteHeader(resp.StatusCode)
 	io.Copy(w, resp.Body)
+}
+
+func handleHTTP(w http.ResponseWriter, req *http.Request) {
+	defaultProxy().handleHTTP(w, req)
 }
 
 func connect(sni string, destConn net.Conn, clientConn net.Conn) {

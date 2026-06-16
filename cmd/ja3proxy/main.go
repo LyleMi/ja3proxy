@@ -56,15 +56,10 @@ func main() {
 		log.Fatal(err)
 	}
 
+	proxy := defaultProxy()
 	server := &http.Server{
-		Addr: Config.Addr + ":" + Config.Port,
-		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.Method == http.MethodConnect {
-				handleTunneling(w, r)
-			} else {
-				handleHTTP(w, r)
-			}
-		}),
+		Addr:    Config.Addr + ":" + Config.Port,
+		Handler: proxy,
 	}
 
 	fmt.Printf(
