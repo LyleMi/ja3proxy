@@ -6,7 +6,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN go build -o /app/ja3proxy
+RUN go build -o /app/ja3proxy ./cmd/ja3proxy
 
 FROM gcr.io/distroless/cc-debian12
 

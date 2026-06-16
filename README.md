@@ -38,9 +38,11 @@ Requirements:
 git clone https://github.com/lylemi/ja3proxy.git
 cd ja3proxy
 
-go build -o ja3proxy .
+go build -o ja3proxy ./cmd/ja3proxy
 ./ja3proxy -port 8080 -client 360Browser -version 7.5
 ```
+
+The CLI source lives in `cmd/ja3proxy`.
 
 Test the proxy:
 
