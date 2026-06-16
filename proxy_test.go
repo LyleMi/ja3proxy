@@ -185,11 +185,194 @@ func TestCustomTLSWrapHandshakeNegotiatesALPNAndSNI(t *testing.T) {
 	}
 }
 
+func TestConnectMITMHandshakeAndRoundTrip(t *testing.T) {
+	oldConfig := Config
+	oldCA := CA
+	oldSessionKey := SessionKey
+	t.Cleanup(func() {
+		Config = oldConfig
+		CA = oldCA
+		SessionKey = oldSessionKey
+	})
+
+	dir := t.TempDir()
+	Config.Debug = false
+	Config.TLSClient = utls.HelloGolang.Client
+	Config.TLSVersion = utls.HelloGolang.Version
+	Config.Cert = filepath.Join(dir, "ca.pem")
+	Config.Key = filepath.Join(dir, "ca-key.pem")
+
+	if err := generateCA(); err != nil {
+		t.Fatalf("generateCA() error = %v", err)
+	}
+	if err := generateSessionKey(); err != nil {
+		t.Fatalf("generateSessionKey() error = %v", err)
+	}
+
+	const serverName = "target.test"
+	deadline := time.Now().Add(5 * time.Second)
+	destConn, upstreamPeer := net.Pipe()
+	clientConn, clientPeer := net.Pipe()
+	for _, conn := range []net.Conn{destConn, upstreamPeer, clientConn, clientPeer} {
+		defer conn.Close()
+		if err := conn.SetDeadline(deadline); err != nil {
+			t.Fatalf("set deadline: %v", err)
+		}
+	}
+
+	upstreamResult := make(chan connectUpstreamResult, 1)
+	upstreamCert := localTLSCertificate(t)
+	go serveConnectUpstream(upstreamPeer, upstreamCert, upstreamResult)
+
+	connectDone := make(chan struct{})
+	go func() {
+		connect(serverName, destConn, clientConn)
+		close(connectDone)
+	}()
+
+	roots := x509.NewCertPool()
+	roots.AddCert(CA.x509Cert)
+	clientTLSConn := tls.Client(clientPeer, &tls.Config{
+		ServerName: serverName,
+		RootCAs:    roots,
+		NextProtos: []string{"h2", "http/1.1"},
+	})
+	defer clientTLSConn.Close()
+	if err := clientTLSConn.SetDeadline(deadline); err != nil {
+		t.Fatalf("set client TLS deadline: %v", err)
+	}
+
+	if err := clientTLSConn.Handshake(); err != nil {
+		t.Fatalf("client TLS handshake error = %v", err)
+	}
+	clientState := clientTLSConn.ConnectionState()
+	if clientState.NegotiatedProtocol != "h2" {
+		t.Fatalf("client negotiated protocol = %q, want h2", clientState.NegotiatedProtocol)
+	}
+	if len(clientState.PeerCertificates) == 0 {
+		t.Fatal("client saw no peer certificate")
+	}
+	leaf := clientState.PeerCertificates[0]
+	if leaf.Subject.CommonName != serverName {
+		t.Fatalf("MITM certificate CN = %q, want %q", leaf.Subject.CommonName, serverName)
+	}
+	if err := leaf.CheckSignatureFrom(CA.x509Cert); err != nil {
+		t.Fatalf("MITM certificate was not signed by test CA: %v", err)
+	}
+
+	request := []byte("ping through tunnel")
+	if _, err := clientTLSConn.Write(request); err != nil {
+		t.Fatalf("client write through tunnel: %v", err)
+	}
+
+	response := []byte("pong from upstream")
+	got := make([]byte, len(response))
+	if _, err := io.ReadFull(clientTLSConn, got); err != nil {
+		t.Fatalf("client read upstream response: %v", err)
+	}
+	if string(got) != string(response) {
+		t.Fatalf("client got response = %q, want %q", got, response)
+	}
+
+	result := receiveConnectUpstreamResult(t, upstreamResult)
+	if result.err != nil {
+		t.Fatalf("upstream TLS server error = %v", result.err)
+	}
+	if result.serverName != serverName {
+		t.Fatalf("upstream saw SNI = %q, want %q", result.serverName, serverName)
+	}
+	if !reflect.DeepEqual(result.supportedProtos, []string{"h2", "http/1.1"}) {
+		t.Fatalf("upstream saw client ALPN = %v, want [h2 http/1.1]", result.supportedProtos)
+	}
+	if result.negotiatedProtocol != "h2" {
+		t.Fatalf("upstream negotiated protocol = %q, want h2", result.negotiatedProtocol)
+	}
+	if string(result.request) != string(request) {
+		t.Fatalf("upstream got request = %q, want %q", result.request, request)
+	}
+
+	clientTLSConn.Close()
+	select {
+	case <-connectDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("connect did not return after client close")
+	}
+}
+
 type tlsServerResult struct {
 	serverName         string
 	supportedProtos    []string
 	negotiatedProtocol string
 	err                error
+}
+
+type connectUpstreamResult struct {
+	serverName         string
+	supportedProtos    []string
+	negotiatedProtocol string
+	request            []byte
+	err                error
+}
+
+func serveConnectUpstream(conn net.Conn, cert tls.Certificate, results chan<- connectUpstreamResult) {
+	helloInfo := make(chan struct {
+		serverName      string
+		supportedProtos []string
+	}, 1)
+	tlsConn := tls.Server(conn, &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		NextProtos:   []string{"h2", "http/1.1"},
+		GetConfigForClient: func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
+			helloInfo <- struct {
+				serverName      string
+				supportedProtos []string
+			}{
+				serverName:      hello.ServerName,
+				supportedProtos: append([]string(nil), hello.SupportedProtos...),
+			}
+			return nil, nil
+		},
+	})
+	defer tlsConn.Close()
+	if err := tlsConn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		results <- connectUpstreamResult{err: err}
+		return
+	}
+
+	if err := tlsConn.Handshake(); err != nil {
+		results <- connectUpstreamResult{err: err}
+		return
+	}
+
+	info := <-helloInfo
+	request := make([]byte, len("ping through tunnel"))
+	if _, err := io.ReadFull(tlsConn, request); err != nil {
+		results <- connectUpstreamResult{err: err}
+		return
+	}
+	if _, err := tlsConn.Write([]byte("pong from upstream")); err != nil {
+		results <- connectUpstreamResult{err: err}
+		return
+	}
+
+	results <- connectUpstreamResult{
+		serverName:         info.serverName,
+		supportedProtos:    info.supportedProtos,
+		negotiatedProtocol: tlsConn.ConnectionState().NegotiatedProtocol,
+		request:            request,
+	}
+}
+
+func receiveConnectUpstreamResult(t *testing.T, results <-chan connectUpstreamResult) connectUpstreamResult {
+	t.Helper()
+
+	select {
+	case result := <-results:
+		return result
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for connect upstream server")
+	}
+	return connectUpstreamResult{}
 }
 
 func newLocalTLSServer(t *testing.T, nextProtos []string) (net.Listener, <-chan tlsServerResult) {
