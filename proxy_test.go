@@ -185,6 +185,83 @@ func TestCustomTLSWrapHandshakeNegotiatesALPNAndSNI(t *testing.T) {
 	}
 }
 
+func TestCustomTLSWrapWithUTLSPresetLimitsALPN(t *testing.T) {
+	oldConfig := Config
+	Config.TLSClient = utls.HelloFirefox_Auto.Client
+	Config.TLSVersion = utls.HelloFirefox_Auto.Version
+	t.Cleanup(func() {
+		Config = oldConfig
+	})
+
+	const serverName = "upstream.test"
+	nextProtos := []string{"http/1.1"}
+	listener, serverResults := newLocalTLSServer(t, []string{"h2", "http/1.1"})
+
+	conn, err := net.DialTimeout("tcp", listener.Addr().String(), 2*time.Second)
+	if err != nil {
+		t.Fatalf("dial local TLS server: %v", err)
+	}
+	if err := conn.SetDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatalf("set client deadline: %v", err)
+	}
+
+	tlsConn, err := customTLSWrap(conn, serverName, nextProtos)
+	if err != nil {
+		conn.Close()
+		t.Fatalf("customTLSWrap() error = %v", err)
+	}
+	defer tlsConn.Close()
+
+	state := tlsConn.ConnectionState()
+	if state.NegotiatedProtocol != "http/1.1" {
+		t.Fatalf("client negotiated protocol = %q, want http/1.1", state.NegotiatedProtocol)
+	}
+
+	result := receiveTLSServerResult(t, serverResults)
+	if result.err != nil {
+		t.Fatalf("server handshake error = %v", result.err)
+	}
+	if result.serverName != serverName {
+		t.Fatalf("server saw SNI = %q, want %q", result.serverName, serverName)
+	}
+	if result.negotiatedProtocol != "http/1.1" {
+		t.Fatalf("server negotiated protocol = %q, want http/1.1", result.negotiatedProtocol)
+	}
+	if !reflect.DeepEqual(result.supportedProtos, nextProtos) {
+		t.Fatalf("server saw client ALPN = %v, want %v", result.supportedProtos, nextProtos)
+	}
+}
+
+func TestCustomTLSWrapReturnsHandshakeError(t *testing.T) {
+	oldConfig := Config
+	Config.TLSClient = utls.HelloGolang.Client
+	Config.TLSVersion = utls.HelloGolang.Version
+	t.Cleanup(func() {
+		Config = oldConfig
+	})
+
+	listener := newBadUpstreamServer(t, func(conn net.Conn) {
+		buf := make([]byte, 1)
+		_, _ = conn.Read(buf)
+		_, _ = conn.Write([]byte("HTTP/1.1 200 OK\r\n\r\n"))
+	})
+
+	conn, err := net.DialTimeout("tcp", listener.Addr().String(), 2*time.Second)
+	if err != nil {
+		t.Fatalf("dial bad upstream: %v", err)
+	}
+	if err := conn.SetDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatalf("set client deadline: %v", err)
+	}
+
+	tlsConn, err := customTLSWrap(conn, "upstream.test", []string{"http/1.1"})
+	if err == nil {
+		tlsConn.Close()
+		t.Fatal("customTLSWrap() error = nil, want handshake error")
+	}
+	conn.Close()
+}
+
 func TestConnectMITMHandshakeAndRoundTrip(t *testing.T) {
 	oldConfig := Config
 	oldCA := CA
@@ -451,6 +528,36 @@ func receiveTLSServerResult(t *testing.T, results <-chan tlsServerResult) tlsSer
 		t.Fatal("timed out waiting for local TLS server")
 	}
 	return tlsServerResult{}
+}
+
+func newBadUpstreamServer(t *testing.T, handle func(net.Conn)) net.Listener {
+	t.Helper()
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen on local TCP address: %v", err)
+	}
+	t.Cleanup(func() {
+		listener.Close()
+	})
+
+	if tcpListener, ok := listener.(*net.TCPListener); ok {
+		if err := tcpListener.SetDeadline(time.Now().Add(2 * time.Second)); err != nil {
+			t.Fatalf("set listener deadline: %v", err)
+		}
+	}
+
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		_ = conn.SetDeadline(time.Now().Add(2 * time.Second))
+		handle(conn)
+	}()
+
+	return listener
 }
 
 func localTLSCertificate(t *testing.T) tls.Certificate {
