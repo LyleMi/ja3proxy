@@ -30,13 +30,13 @@ func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return f(req)
 }
 
-func replaceDefaultTransport(t *testing.T, rt http.RoundTripper) {
+func replaceHTTPTransport(t *testing.T, rt http.RoundTripper) {
 	t.Helper()
 
-	original := http.DefaultTransport
-	http.DefaultTransport = rt
+	original := HTTPTransport
+	HTTPTransport = rt
 	t.Cleanup(func() {
-		http.DefaultTransport = original
+		HTTPTransport = original
 	})
 }
 
@@ -884,7 +884,7 @@ func replaceTunnelConnect(t *testing.T, connect func(sni string, destConn net.Co
 
 func TestHandleHTTPWritesUpstreamResponse(t *testing.T) {
 	var upstreamReq *http.Request
-	replaceDefaultTransport(t, roundTripFunc(func(req *http.Request) (*http.Response, error) {
+	replaceHTTPTransport(t, roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		upstreamReq = req
 		return &http.Response{
 			StatusCode: http.StatusAccepted,
@@ -934,7 +934,7 @@ func TestHandleHTTPWritesUpstreamResponse(t *testing.T) {
 }
 
 func TestHandleHTTPRoundTripErrorReturnsServiceUnavailable(t *testing.T) {
-	replaceDefaultTransport(t, roundTripFunc(func(req *http.Request) (*http.Response, error) {
+	replaceHTTPTransport(t, roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		return nil, errors.New("upstream unavailable")
 	}))
 

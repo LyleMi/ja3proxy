@@ -40,7 +40,7 @@ func NewUpstreamDialer(socksAddr string, timeout time.Duration) (*UpstreamDialer
 		defaultTransport.Proxy = func(req *http.Request) (*url.URL, error) {
 			return parsedURL, nil
 		}
-		http.DefaultTransport = defaultTransport
+		HTTPTransport = defaultTransport
 	} else {
 		dialer = &net.Dialer{Timeout: timeout}
 	}

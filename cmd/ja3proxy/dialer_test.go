@@ -112,9 +112,9 @@ func TestNewUpstreamDialerSocksURLValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			oldTransport := http.DefaultTransport
+			oldTransport := HTTPTransport
 			t.Cleanup(func() {
-				http.DefaultTransport = oldTransport
+				HTTPTransport = oldTransport
 			})
 
 			upstream, err := NewUpstreamDialer(tt.socksAddr, time.Second)
@@ -134,19 +134,24 @@ func TestNewUpstreamDialerSocksURLValidation(t *testing.T) {
 	}
 }
 
-func TestNewUpstreamDialerReadmeSocksAddressSetsHTTPProxy(t *testing.T) {
-	oldTransport := http.DefaultTransport
+func TestNewUpstreamDialerReadmeSocksAddressSetsHTTPTransportProxy(t *testing.T) {
+	oldHTTPTransport := HTTPTransport
+	oldDefaultTransport := http.DefaultTransport
 	t.Cleanup(func() {
-		http.DefaultTransport = oldTransport
+		HTTPTransport = oldHTTPTransport
 	})
 
 	if _, err := NewUpstreamDialer("127.0.0.1:1080", time.Second); err != nil {
 		t.Fatalf("NewUpstreamDialer() error = %v", err)
 	}
 
-	transport, ok := http.DefaultTransport.(*http.Transport)
+	if http.DefaultTransport != oldDefaultTransport {
+		t.Fatal("http.DefaultTransport was modified")
+	}
+
+	transport, ok := HTTPTransport.(*http.Transport)
 	if !ok {
-		t.Fatalf("http.DefaultTransport = %T, want *http.Transport", http.DefaultTransport)
+		t.Fatalf("HTTPTransport = %T, want *http.Transport", HTTPTransport)
 	}
 	proxyURL, err := transport.Proxy(&http.Request{})
 	if err != nil {

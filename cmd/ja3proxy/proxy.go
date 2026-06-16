@@ -134,11 +134,13 @@ var tunnelDial = func(network, addr string) (net.Conn, error) {
 
 var tunnelConnect = connect
 
+var HTTPTransport http.RoundTripper = http.DefaultTransport
+
 func handleHTTP(w http.ResponseWriter, req *http.Request) {
 	outReq := req.Clone(req.Context())
 	outReq.RequestURI = ""
 
-	resp, err := http.DefaultTransport.RoundTrip(outReq)
+	resp, err := HTTPTransport.RoundTrip(outReq)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		log.Println(err)
