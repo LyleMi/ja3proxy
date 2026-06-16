@@ -1,53 +1,91 @@
 # JA3Proxy
 
-Customizing TLS (JA3) Fingerprints through HTTP Proxy
+JA3Proxy is an HTTP proxy that uses
+[uTLS](https://github.com/refraction-networking/utls) to create outbound TLS
+connections with configurable ClientHello fingerprints. It can be used to test
+how applications behave behind different browser-like TLS fingerprints, while
+keeping a familiar HTTP proxy interface for clients.
 
-## Usage
+## Features
 
-### Building from source
+- HTTP and HTTPS proxy support.
+- Customizable TLS ClientHello fingerprints through uTLS presets.
+- Dynamic MITM certificates for HTTPS `CONNECT` traffic.
+- Automatic local CA generation when no certificate/key pair is provided.
+- Optional SOCKS5 upstream proxy for both HTTP and HTTPS traffic.
+- Docker and Docker Compose examples included.
+
+## How it works
+
+For plain HTTP requests, JA3Proxy forwards the request directly. For HTTPS
+`CONNECT` requests, it establishes a TLS connection to the upstream server using
+the configured uTLS fingerprint, then serves a dynamically generated certificate
+to the client using the local CA.
+
+Because HTTPS traffic is intercepted, clients must either trust the generated CA
+certificate or explicitly skip certificate verification for testing.
+
+## Quick start
+
+### Build from source
+
+Requirements:
+
+- Go 1.24 or newer
+- `make` if you want to use the provided Makefile
 
 ```bash
-git clone https://github.com/lylemi/ja3proxy
+git clone https://github.com/lylemi/ja3proxy.git
 cd ja3proxy
-make
-./ja3proxy -port 8080 -client 360Browser -version 7.5
 
-curl -v -k --proxy http://localhost:8080 https://www.example.com
+go build -o ja3proxy .
+./ja3proxy -port 8080 -client 360Browser -version 7.5
 ```
 
-### Using docker CLI
+Test the proxy:
 
 ```bash
-docker run \
-      -v ./credentials:/app/credentials \
-      -p 8080:8080 \
-      ghcr.io/lylemi/ja3proxy:latest \
-      -cert /app/credentials/cert.pem \
-      -key /app/credentials/key.pem \
-      -client 360Browser \
-      -version 7.5
+curl -v -k --proxy http://127.0.0.1:8080 https://www.example.com
 ```
 
-### Using docker compose
+The first run creates `cert.pem` and `key.pem` in the working directory if they
+do not already exist.
 
-See [`compose.yaml`](https://github.com/LyleMi/ja3proxy/blob/master/compose.yaml)
+### Docker
+
+```bash
+mkdir -p credentials
+
+docker run --rm \
+  -v ./credentials:/app/credentials \
+  -p 8080:8080 \
+  ghcr.io/lylemi/ja3proxy:latest \
+  -cert /app/credentials/cert.pem \
+  -key /app/credentials/key.pem \
+  -client 360Browser \
+  -version 7.5
+```
+
+### Docker Compose
 
 ```bash
 docker compose up -d
 ```
 
-### CLI usage
+See [compose.yaml](./compose.yaml) for the full service definition.
 
-```bash
+## Configuration
+
+```text
 Usage of ja3proxy:
   -addr string
         proxy listen host
   -port string
         proxy listen port (default "8080")
   -cert string
-        proxy tls cert (default "cert.pem")
+        proxy CA cert (default "cert.pem")
   -key string
-        proxy tls key (default "key.pem")
+        proxy CA key (default "key.pem")
   -client string
         utls client (default "Golang")
   -version string
@@ -58,38 +96,82 @@ Usage of ja3proxy:
         enable debug
 ```
 
-### Perdefined clients and versions
+Example with a SOCKS5 upstream proxy:
 
-> for full list, see: https://github.com/refraction-networking/utls/blob/master/u_common.go
+```bash
+./ja3proxy \
+  -port 8080 \
+  -client Chrome \
+  -version 106 \
+  -upstream socks5://127.0.0.1:1080
+```
+
+The `-upstream` flag also accepts `host:port`, for example
+`127.0.0.1:1080`. Only SOCKS5 upstream proxies are supported.
+
+## TLS fingerprints
+
+JA3Proxy passes the `-client` and `-version` values to uTLS. Supported presets
+depend on the uTLS version used by this project. See the uTLS
+[ClientHelloID definitions](https://github.com/refraction-networking/utls/blob/master/u_common.go)
+for the authoritative list.
+
+Common presets:
 
 | Client | Version |
-| ------ | ------- |
+| --- | --- |
 | Golang | 0 |
-| Firefox | 55 |
-| Firefox | 56 |
-| Firefox | 63 |
-| Firefox | 99 |
-| Firefox | 105 |
-| Chrome | 58 |
-| Chrome | 62 |
-| Chrome | 70 |
-| Chrome | 96 |
-| Chrome | 102 |
-| Chrome | 106 |
-| iOS | 12.1 |
-| iOS | 13 |
-| iOS | 14 |
+| Firefox | 55, 56, 63, 99, 105 |
+| Chrome | 58, 62, 70, 96, 102, 106 |
+| iOS | 12.1, 13, 14 |
 | Android | 11 |
-| Edge | 85 |
-| Edge | 106 |
+| Edge | 85, 106 |
 | Safari | 16.0 |
 | 360Browser | 7.5 |
 | QQBrowser | 11.1 |
 
-## Contribution
+## Certificates
 
-If you have any ideas or suggestions, please feel free to submit a pull request. We appreciate any contributions.
+JA3Proxy needs a CA certificate and private key to generate per-host
+certificates for HTTPS interception.
 
-## Contact
+- If both files exist, they are loaded from `-cert` and `-key`.
+- If neither file exists, JA3Proxy generates a new CA pair.
+- If only one file exists, startup fails to avoid using a mismatched pair.
 
-If you have any questions or suggestions, please feel free to contact us.
+For browser or application testing, import the generated CA certificate into the
+client trust store. For one-off command-line checks, tools such as `curl -k`
+can skip verification.
+
+## Development
+
+Run the test suite:
+
+```bash
+go test ./...
+```
+
+Build release binaries with the Makefile:
+
+```bash
+make
+```
+
+This creates Linux and Windows AMD64 binaries in the project root.
+
+## Security notice
+
+JA3Proxy performs TLS interception and can expose decrypted traffic to the
+machine running the proxy. Use it only in environments where you have permission
+to inspect the traffic. Protect generated CA private keys carefully and remove
+them from client trust stores when they are no longer needed.
+
+## Contributing
+
+Issues and pull requests are welcome. Please include a clear description,
+reproduction steps when reporting bugs, and tests for behavior changes when
+practical.
+
+## License
+
+This project is licensed under the [MIT License](./LICENSE).
