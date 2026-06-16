@@ -22,6 +22,7 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           goos: ${{ matrix.goos }}
           goarch: ${{ matrix.goarch }}
+          project_path: ./cmd/ja3proxy
           binary_name: "ja3proxy"
   docker-image:
     name: Build and push Docker image to GHCR
