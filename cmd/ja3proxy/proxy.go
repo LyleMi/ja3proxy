@@ -261,16 +261,20 @@ func connect(sni string, destConn net.Conn, clientConn net.Conn) {
 	defer clientConn.Close()
 	var destTLSConn *utls.UConn
 
-	tlsCert, err := generateCertificate(sni)
-	if err != nil {
-		fmt.Println("Error generating certificate: ", err)
-	}
-
 	config := &tls.Config{
 		InsecureSkipVerify: true,
-		Certificates:       []tls.Certificate{tlsCert},
 		GetConfigForClient: func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
-			destTLSConn, err = customTLSWrap(destConn, sni, upstreamALPN(hello.SupportedProtos))
+			serverName := sni
+			if hello.ServerName != "" {
+				serverName = hello.ServerName
+			}
+
+			tlsCert, err := generateCertificate(serverName)
+			if err != nil {
+				return nil, fmt.Errorf("generate certificate: %w", err)
+			}
+
+			destTLSConn, err = customTLSWrap(destConn, serverName, upstreamALPN(hello.SupportedProtos))
 			if err != nil {
 				return nil, err
 			}
@@ -287,7 +291,7 @@ func connect(sni string, destConn net.Conn, clientConn net.Conn) {
 		clientConn,
 		config,
 	)
-	err = clientTLSConn.Handshake()
+	err := clientTLSConn.Handshake()
 	if err != nil {
 		log.Println("Failed to perform TLS handshake: ", err)
 		return

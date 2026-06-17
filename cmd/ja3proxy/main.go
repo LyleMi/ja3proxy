@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"time"
@@ -70,16 +71,19 @@ func main() {
 	}
 
 	proxy := NewProxy(CustomDialer.Dial, tunnelConnect, CustomDialer.Transport)
+	listener, err := net.Listen("tcp", Config.Addr+":"+Config.Port)
+	if err != nil {
+		log.Fatal(err)
+	}
 	server := &http.Server{
-		Addr:    Config.Addr + ":" + Config.Port,
 		Handler: proxy,
 	}
 
 	fmt.Printf(
-		"HTTP Proxy Server listen at %s:%s, with tls fingerprint %s %s\n",
+		"HTTP/SOCKS5 Proxy Server listen at %s:%s, with tls fingerprint %s %s\n",
 		Config.Addr, Config.Port, configuredTLSFingerprint().Version, configuredTLSFingerprint().Client,
 	)
-	err = server.ListenAndServe()
+	err = server.Serve(newMixedProxyListener(listener, proxy))
 	if err != nil {
 		log.Fatal(err)
 		os.Exit(-1)

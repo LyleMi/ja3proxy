@@ -1,14 +1,14 @@
 # JA3Proxy
 
-JA3Proxy is an HTTP proxy that uses
+JA3Proxy is an HTTP/SOCKS5 proxy that uses
 [uTLS](https://github.com/refraction-networking/utls) to create outbound TLS
 connections with configurable ClientHello fingerprints. It can be used to test
 how applications behave behind different browser-like TLS fingerprints, while
-keeping a familiar HTTP proxy interface for clients.
+keeping familiar proxy interfaces for clients.
 
 ## Features
 
-- HTTP and HTTPS proxy support.
+- HTTP, HTTPS, and SOCKS5 proxy support on the same listen address.
 - Customizable TLS ClientHello fingerprints through uTLS presets.
 - Dynamic MITM certificates for HTTPS `CONNECT` traffic.
 - Automatic local CA generation when no certificate/key pair is provided.
@@ -20,7 +20,9 @@ keeping a familiar HTTP proxy interface for clients.
 For plain HTTP requests, JA3Proxy forwards the request directly. For HTTPS
 `CONNECT` requests, it establishes a TLS connection to the upstream server using
 the configured uTLS fingerprint, then serves a dynamically generated certificate
-to the client using the local CA.
+to the client using the local CA. SOCKS5 connections are accepted on the same
+listen address: TLS streams use the same MITM/uTLS path, while non-TLS streams
+are forwarded as plain TCP.
 
 Because HTTPS traffic is intercepted, clients must either trust the generated CA
 certificate or explicitly skip certificate verification for testing.
@@ -48,6 +50,7 @@ Test the proxy:
 
 ```bash
 curl -v -k --proxy http://127.0.0.1:8080 https://www.example.com
+curl -v -k --proxy socks5h://127.0.0.1:8080 https://www.example.com
 ```
 
 The first run creates `credentials/cert.pem` and `credentials/key.pem` if they
