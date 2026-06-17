@@ -22,6 +22,10 @@ import (
 )
 
 func generateCA() error {
+	return CA.Generate(Config.Cert, Config.Key)
+}
+
+func (ca *CertificateAuthority) Generate(certPath, keyPath string) error {
 	csr := cfsr.CertificateRequest{
 		CN:         "ja3proxy CA",
 		KeyRequest: cfsr.NewKeyRequest(),
@@ -42,13 +46,13 @@ func generateCA() error {
 		return err
 	}
 
-	CA.tlsCert = tlsCert
-	CA.x509Cert = x509Cert
+	ca.tlsCert = tlsCert
+	ca.x509Cert = x509Cert
 
-	if err := ensureParentDir(Config.Cert); err != nil {
+	if err := ensureParentDir(certPath); err != nil {
 		return err
 	}
-	caOut, err := os.Create(Config.Cert)
+	caOut, err := os.Create(certPath)
 	if err != nil {
 		return err
 	}
@@ -58,10 +62,10 @@ func generateCA() error {
 		return err
 	}
 
-	if err := ensureParentDir(Config.Key); err != nil {
+	if err := ensureParentDir(keyPath); err != nil {
 		return err
 	}
-	keyOut, err := os.OpenFile(Config.Key, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+	keyOut, err := os.OpenFile(keyPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
 	if err != nil {
 		return err
 	}
@@ -84,6 +88,10 @@ func ensureParentDir(path string) error {
 }
 
 func generateSessionKey() error {
+	return SessionKey.Generate()
+}
+
+func (session *SessionKeyHelper) Generate() error {
 	privKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return err
@@ -96,8 +104,8 @@ func generateSessionKey() error {
 
 	PEMBlock := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: derBytes})
 
-	SessionKey.privateKey = privKey
-	SessionKey.PEMBlock = PEMBlock
+	session.privateKey = privKey
+	session.PEMBlock = PEMBlock
 
 	return nil
 }
@@ -115,13 +123,17 @@ func stripPort(s string) string {
 }
 
 func generateCertificate(sni string) (tls.Certificate, error) {
-	if SessionKey.privateKey == nil || len(SessionKey.PEMBlock) == 0 {
+	return CA.GenerateCertificate(SessionKey, sni)
+}
+
+func (ca *CertificateAuthority) GenerateCertificate(session SessionKeyHelper, sni string) (tls.Certificate, error) {
+	if session.privateKey == nil || len(session.PEMBlock) == 0 {
 		return tls.Certificate{}, fmt.Errorf("session key has not been generated")
 	}
-	if CA.x509Cert == nil {
+	if ca.x509Cert == nil {
 		return tls.Certificate{}, fmt.Errorf("CA certificate has not been loaded")
 	}
-	cryptoSigner, ok := CA.tlsCert.PrivateKey.(crypto.Signer)
+	cryptoSigner, ok := ca.tlsCert.PrivateKey.(crypto.Signer)
 	if !ok {
 		return tls.Certificate{}, fmt.Errorf("CA private key is not a crypto signer")
 	}
@@ -133,7 +145,7 @@ func generateCertificate(sni string) (tls.Certificate, error) {
 		KeyRequest: cfsr.NewKeyRequest(),
 	}
 
-	csrBytes, err := cfsr.Generate(SessionKey.privateKey, request)
+	csrBytes, err := cfsr.Generate(session.privateKey, request)
 	if err != nil {
 		return tls.Certificate{}, err
 	}
@@ -143,7 +155,7 @@ func generateCertificate(sni string) (tls.Certificate, error) {
 		Default: profile,
 	}
 
-	signer, err := local.NewSigner(cryptoSigner, CA.x509Cert, cfsigner.DefaultSigAlgo(cryptoSigner), policy)
+	signer, err := local.NewSigner(cryptoSigner, ca.x509Cert, cfsigner.DefaultSigAlgo(cryptoSigner), policy)
 	if err != nil {
 		return tls.Certificate{}, err
 	}
@@ -161,12 +173,16 @@ func generateCertificate(sni string) (tls.Certificate, error) {
 		return tls.Certificate{}, err
 	}
 
-	tlsCert, err := tls.X509KeyPair(certBytes, SessionKey.PEMBlock)
+	tlsCert, err := tls.X509KeyPair(certBytes, session.PEMBlock)
 	return tlsCert, err
 }
 
 func loadExistingCA() error {
-	tlsCert, err := tls.LoadX509KeyPair(Config.Cert, Config.Key)
+	return CA.Load(Config.Cert, Config.Key)
+}
+
+func (ca *CertificateAuthority) Load(certPath, keyPath string) error {
+	tlsCert, err := tls.LoadX509KeyPair(certPath, keyPath)
 	if err != nil {
 		return err
 	} else {
@@ -175,8 +191,8 @@ func loadExistingCA() error {
 			return err
 		}
 
-		CA.tlsCert = tlsCert
-		CA.x509Cert = x509Cert
+		ca.tlsCert = tlsCert
+		ca.x509Cert = x509Cert
 
 		return nil
 	}

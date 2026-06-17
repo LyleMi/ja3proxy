@@ -17,26 +17,30 @@ type TLSFingerprint struct {
 	Version string `json:"version"`
 }
 
-var (
-	tlsFingerprintMu      sync.RWMutex
-	currentTLSFingerprint *TLSFingerprint
-)
-
-func configuredTLSFingerprint() TLSFingerprint {
-	tlsFingerprintMu.RLock()
-	defer tlsFingerprintMu.RUnlock()
-
-	if currentTLSFingerprint != nil {
-		return *currentTLSFingerprint
-	}
-
-	return TLSFingerprint{
-		Client:  Config.TLSClient,
-		Version: Config.TLSVersion,
-	}
+type TLSFingerprintStore struct {
+	mu      sync.RWMutex
+	current *TLSFingerprint
 }
 
-func setTLSFingerprint(fingerprint TLSFingerprint) error {
+func (s *TLSFingerprintStore) Get() (TLSFingerprint, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.current == nil {
+		return TLSFingerprint{}, false
+	}
+	return *s.current, true
+}
+
+func (s *TLSFingerprintStore) Set(fingerprint TLSFingerprint) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	f := fingerprint
+	s.current = &f
+}
+
+func (s *TLSFingerprintStore) SetValidated(fingerprint TLSFingerprint) error {
 	if fingerprint.Client == "" {
 		return fmt.Errorf("fingerprint client is required")
 	}
@@ -47,12 +51,15 @@ func setTLSFingerprint(fingerprint TLSFingerprint) error {
 		return err
 	}
 
-	tlsFingerprintMu.Lock()
-	defer tlsFingerprintMu.Unlock()
-
-	f := fingerprint
-	currentTLSFingerprint = &f
+	s.Set(fingerprint)
 	return nil
+}
+
+func (s *TLSFingerprintStore) Reset() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.current = nil
 }
 
 func validateTLSFingerprint(fingerprint TLSFingerprint) error {
@@ -67,13 +74,6 @@ func validateTLSFingerprint(fingerprint TLSFingerprint) error {
 		return fmt.Errorf("unsupported TLS fingerprint %s %s: %w", fingerprint.Version, fingerprint.Client, err)
 	}
 	return nil
-}
-
-func resetTLSFingerprint() {
-	tlsFingerprintMu.Lock()
-	defer tlsFingerprintMu.Unlock()
-
-	currentTLSFingerprint = nil
 }
 
 func loadTLSFingerprintFile(path string) (TLSFingerprint, error) {
@@ -95,12 +95,12 @@ func loadTLSFingerprintFile(path string) (TLSFingerprint, error) {
 	return fingerprint, nil
 }
 
-func applyTLSFingerprintFile(path string) error {
+func (s *TLSFingerprintStore) ApplyFile(path string) error {
 	fingerprint, err := loadTLSFingerprintFile(path)
 	if err != nil {
 		return err
 	}
-	if err := setTLSFingerprint(fingerprint); err != nil {
+	if err := s.SetValidated(fingerprint); err != nil {
 		return err
 	}
 
@@ -108,11 +108,11 @@ func applyTLSFingerprintFile(path string) error {
 	return nil
 }
 
-func watchTLSFingerprintFile(ctx context.Context, path string, interval time.Duration) error {
+func (s *TLSFingerprintStore) WatchFile(ctx context.Context, path string, interval time.Duration) error {
 	if interval <= 0 {
 		return fmt.Errorf("fingerprint reload interval must be positive")
 	}
-	if err := applyTLSFingerprintFile(path); err != nil {
+	if err := s.ApplyFile(path); err != nil {
 		return err
 	}
 
@@ -141,7 +141,7 @@ func watchTLSFingerprintFile(ctx context.Context, path string, interval time.Dur
 					continue
 				}
 
-				if err := applyTLSFingerprintFile(path); err != nil {
+				if err := s.ApplyFile(path); err != nil {
 					log.Printf("reload TLS fingerprint config: %v", err)
 					continue
 				}
@@ -152,4 +152,26 @@ func watchTLSFingerprintFile(ctx context.Context, path string, interval time.Dur
 	}()
 
 	return nil
+}
+
+var defaultTLSFingerprintStore TLSFingerprintStore
+
+func configuredTLSFingerprint() TLSFingerprint {
+	return newDefaultApp().configuredTLSFingerprint()
+}
+
+func setTLSFingerprint(fingerprint TLSFingerprint) error {
+	return defaultTLSFingerprintStore.SetValidated(fingerprint)
+}
+
+func resetTLSFingerprint() {
+	defaultTLSFingerprintStore.Reset()
+}
+
+func applyTLSFingerprintFile(path string) error {
+	return defaultTLSFingerprintStore.ApplyFile(path)
+}
+
+func watchTLSFingerprintFile(ctx context.Context, path string, interval time.Duration) error {
+	return defaultTLSFingerprintStore.WatchFile(ctx, path, interval)
 }
