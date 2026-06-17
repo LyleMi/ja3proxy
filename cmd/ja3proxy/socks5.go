@@ -8,103 +8,25 @@ import (
 	"log"
 	"net"
 	"strconv"
-	"sync"
 	"time"
 )
 
 const (
-	socks5Version       = 0x05
-	socks5NoAuth        = 0x00
-	socks5NoAcceptable  = 0xff
-	socks5Connect       = 0x01
-	socks5Reserved      = 0x00
-	socks5IPv4          = 0x01
-	socks5Domain        = 0x03
-	socks5IPv6          = 0x04
-	socks5Succeeded     = 0x00
-	socks5GeneralFail   = 0x01
-	socks5CommandFail   = 0x07
-	socks5AddressFail   = 0x08
-	tlsHandshakeRecord  = 0x16
-	defaultHTTPConnBack = 64
-	socks5TLSPeekTime   = 100 * time.Millisecond
+	socks5Version      = 0x05
+	socks5NoAuth       = 0x00
+	socks5NoAcceptable = 0xff
+	socks5Connect      = 0x01
+	socks5Reserved     = 0x00
+	socks5IPv4         = 0x01
+	socks5Domain       = 0x03
+	socks5IPv6         = 0x04
+	socks5Succeeded    = 0x00
+	socks5GeneralFail  = 0x01
+	socks5CommandFail  = 0x07
+	socks5AddressFail  = 0x08
+	tlsHandshakeRecord = 0x16
+	socks5TLSPeekTime  = 100 * time.Millisecond
 )
-
-type mixedProxyListener struct {
-	base      net.Listener
-	proxy     *Proxy
-	httpConns chan net.Conn
-	done      chan struct{}
-	closeOnce sync.Once
-}
-
-func newMixedProxyListener(base net.Listener, proxy *Proxy) net.Listener {
-	listener := &mixedProxyListener{
-		base:      base,
-		proxy:     proxy,
-		httpConns: make(chan net.Conn, defaultHTTPConnBack),
-		done:      make(chan struct{}),
-	}
-	go listener.acceptLoop()
-	return listener
-}
-
-func (listener *mixedProxyListener) Accept() (net.Conn, error) {
-	select {
-	case conn := <-listener.httpConns:
-		return conn, nil
-	case <-listener.done:
-		return nil, net.ErrClosed
-	}
-}
-
-func (listener *mixedProxyListener) Close() error {
-	var err error
-	listener.closeOnce.Do(func() {
-		close(listener.done)
-		err = listener.base.Close()
-	})
-	return err
-}
-
-func (listener *mixedProxyListener) Addr() net.Addr {
-	return listener.base.Addr()
-}
-
-func (listener *mixedProxyListener) acceptLoop() {
-	for {
-		conn, err := listener.base.Accept()
-		if err != nil {
-			_ = listener.Close()
-			return
-		}
-		go listener.route(conn)
-	}
-}
-
-func (listener *mixedProxyListener) route(conn net.Conn) {
-	reader := bufio.NewReader(conn)
-	first, err := reader.Peek(1)
-	if err != nil {
-		conn.Close()
-		return
-	}
-
-	bufferedConn := &bufferedReadConn{
-		Conn:   conn,
-		reader: reader,
-	}
-	if first[0] == socks5Version {
-		listener.proxy.handleSOCKS5(bufferedConn)
-		return
-	}
-
-	select {
-	case listener.httpConns <- bufferedConn:
-	case <-listener.done:
-		conn.Close()
-	}
-}
 
 type socks5Request struct {
 	command byte

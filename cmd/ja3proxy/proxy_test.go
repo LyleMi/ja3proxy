@@ -656,6 +656,34 @@ func TestJunctionForwardsBothDirections(t *testing.T) {
 	}
 }
 
+func TestJunctionReturnsWhenOneSideCloses(t *testing.T) {
+	destConn, upstreamPeer := net.Pipe()
+	clientConn, clientPeer := net.Pipe()
+	conns := []net.Conn{destConn, upstreamPeer, clientConn, clientPeer}
+	for _, conn := range conns {
+		defer conn.Close()
+		if err := conn.SetDeadline(time.Now().Add(2 * time.Second)); err != nil {
+			t.Fatalf("set deadline: %v", err)
+		}
+	}
+
+	done := make(chan struct{})
+	go func() {
+		junction(destConn, clientConn)
+		close(done)
+	}()
+
+	if err := clientPeer.Close(); err != nil {
+		t.Fatalf("clientPeer.Close() error = %v", err)
+	}
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("junction did not return after one side closed")
+	}
+}
+
 func TestHandleTunnelingDialErrorReturnsServiceUnavailable(t *testing.T) {
 	proxy := NewProxy(func(network, addr string) (net.Conn, error) {
 		if network != "tcp" {

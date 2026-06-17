@@ -158,6 +158,38 @@ func TestDebugJunctionForwardsBothDirectionsAndCloses(t *testing.T) {
 	}
 }
 
+func TestDebugJunctionReturnsWhenOneSideCloses(t *testing.T) {
+	destConn, destPeer := net.Pipe()
+	clientConn, clientPeer := net.Pipe()
+	defer destConn.Close()
+	defer destPeer.Close()
+	defer clientConn.Close()
+	defer clientPeer.Close()
+
+	deadline := time.Now().Add(time.Second)
+	for _, conn := range []net.Conn{destConn, destPeer, clientConn, clientPeer} {
+		if err := conn.SetDeadline(deadline); err != nil {
+			t.Fatalf("SetDeadline() error = %v", err)
+		}
+	}
+
+	done := make(chan struct{})
+	go func() {
+		debugJunction(destConn, clientConn)
+		close(done)
+	}()
+
+	if err := clientPeer.Close(); err != nil {
+		t.Fatalf("clientPeer.Close() error = %v", err)
+	}
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("debugJunction did not return after one side closed")
+	}
+}
+
 type recordingConn struct {
 	net.Conn
 	writes [][]byte
