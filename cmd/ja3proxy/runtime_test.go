@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,14 +20,12 @@ func newRuntimeTestApp(t *testing.T) *App {
 	ca := &CertificateAuthority{}
 	sessionKey := &SessionKeyHelper{}
 	fingerprints := &TLSFingerprintStore{}
-	var upstreamDialer *UpstreamDialer
 
 	return &App{
 		Config:          config,
 		CA:              ca,
 		SessionKey:      sessionKey,
 		TLSFingerprints: fingerprints,
-		upstreamDialer:  &upstreamDialer,
 	}
 }
 
@@ -65,6 +64,71 @@ func TestEnsureCAReturnsErrorWhenOnlyKeyExists(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "found CA key") {
 		t.Fatalf("error = %q, want CA key context", err)
+	}
+}
+
+func TestParseFlagsAppliesArgs(t *testing.T) {
+	app := newRuntimeTestApp(t)
+
+	err := app.parseFlags([]string{
+		"-cert", "custom-cert.pem",
+		"-key", "custom-key.pem",
+		"-addr", "127.0.0.1",
+		"-port", "9090",
+		"-client", "Chrome",
+		"-version", "120",
+		"-fingerprint-config", "fingerprints.json",
+		"-upstream", "127.0.0.1:1080",
+		"-debug",
+	})
+	if err != nil {
+		t.Fatalf("parse flags: %v", err)
+	}
+
+	if app.Config.Cert != "custom-cert.pem" {
+		t.Fatalf("cert = %q, want custom-cert.pem", app.Config.Cert)
+	}
+	if app.Config.Key != "custom-key.pem" {
+		t.Fatalf("key = %q, want custom-key.pem", app.Config.Key)
+	}
+	if app.Config.Addr != "127.0.0.1" {
+		t.Fatalf("addr = %q, want 127.0.0.1", app.Config.Addr)
+	}
+	if app.Config.Port != "9090" {
+		t.Fatalf("port = %q, want 9090", app.Config.Port)
+	}
+	if app.Config.TLSClient != "Chrome" {
+		t.Fatalf("client = %q, want Chrome", app.Config.TLSClient)
+	}
+	if app.Config.TLSVersion != "120" {
+		t.Fatalf("version = %q, want 120", app.Config.TLSVersion)
+	}
+	if app.Config.FingerprintConfig != "fingerprints.json" {
+		t.Fatalf("fingerprint config = %q, want fingerprints.json", app.Config.FingerprintConfig)
+	}
+	if app.Config.Upstream != "127.0.0.1:1080" {
+		t.Fatalf("upstream = %q, want 127.0.0.1:1080", app.Config.Upstream)
+	}
+	if !app.Config.Debug {
+		t.Fatal("debug = false, want true")
+	}
+	if flag.CommandLine.Lookup("cert") != nil {
+		t.Fatal("parseFlags registered cert on global flag.CommandLine")
+	}
+}
+
+func TestParseFlagsReturnsErrorForInvalidFlag(t *testing.T) {
+	app := newRuntimeTestApp(t)
+
+	err := app.parseFlags([]string{"-unknown"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "flag provided but not defined") {
+		t.Fatalf("error = %q, want unknown flag context", err)
+	}
+	if flag.CommandLine.Lookup("unknown") != nil {
+		t.Fatal("parseFlags registered unknown on global flag.CommandLine")
 	}
 }
 

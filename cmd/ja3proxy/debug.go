@@ -28,29 +28,14 @@ func (writer DebugWriter) Write(data []byte) (n int, err error) {
 }
 
 func debugJunction(destConn net.Conn, clientConn net.Conn) {
-	chDone := make(chan struct{}, 2)
+	destWriter := &DebugWriter{
+		Name: clientConn.RemoteAddr().String(),
+		Conn: destConn,
+	}
+	clientWriter := &DebugWriter{
+		Name: destConn.RemoteAddr().String(),
+		Conn: clientConn,
+	}
 
-	go func() {
-		writer := &DebugWriter{
-			Name: clientConn.RemoteAddr().String(),
-			Conn: destConn,
-		}
-
-		copyAndClose(writer, clientConn, destConn, "copy client to dest error:")
-		chDone <- struct{}{}
-	}()
-
-	go func() {
-		writer := &DebugWriter{
-			Name: destConn.RemoteAddr().String(),
-			Conn: clientConn,
-		}
-
-		copyAndClose(writer, destConn, clientConn, "copy dest to client error:")
-		chDone <- struct{}{}
-	}()
-
-	// wait for both copy ops to complete
-	<-chDone
-	<-chDone
+	pipeConns(destConn, clientConn, destWriter, clientWriter)
 }

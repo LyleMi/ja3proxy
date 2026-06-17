@@ -7,7 +7,7 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"strings"
+	"time"
 )
 
 const connectEstablishedResponse = "HTTP/1.1 200 Connection Established\r\n\r\n"
@@ -41,10 +41,10 @@ func NewProxy(
 	transport http.RoundTripper,
 ) *Proxy {
 	if dial == nil {
-		dial = tunnelDial
+		dial = defaultTunnelDial
 	}
 	if connect == nil {
-		connect = tunnelConnect
+		connect = defaultTunnelConnect
 	}
 	if transport == nil {
 		transport = http.DefaultTransport
@@ -68,7 +68,7 @@ func (p *Proxy) dial(network, addr string) (net.Conn, error) {
 	if p != nil && p.Dial != nil {
 		return p.Dial(network, addr)
 	}
-	return tunnelDial(network, addr)
+	return defaultTunnelDial(network, addr)
 }
 
 func (p *Proxy) connect(sni string, destConn net.Conn, clientConn net.Conn) {
@@ -76,7 +76,7 @@ func (p *Proxy) connect(sni string, destConn net.Conn, clientConn net.Conn) {
 		p.Connect(sni, destConn, clientConn)
 		return
 	}
-	tunnelConnect(sni, destConn, clientConn)
+	defaultTunnelConnect(sni, destConn, clientConn)
 }
 
 func (p *Proxy) transport() http.RoundTripper {
@@ -133,14 +133,16 @@ func (p *Proxy) handleTunneling(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	go p.connect(strings.Split(r.Host, ":")[0], destConn, tunnelClientConn)
+	go p.connect(stripPort(r.Host), destConn, tunnelClientConn)
 }
 
-var tunnelDial = func(network, addr string) (net.Conn, error) {
-	return CustomDialer.Dial(network, addr)
+func defaultTunnelDial(network, addr string) (net.Conn, error) {
+	return net.DialTimeout(network, addr, 10*time.Second)
 }
 
-var tunnelConnect = connect
+func defaultTunnelConnect(_ string, destConn net.Conn, clientConn net.Conn) {
+	junction(destConn, clientConn)
+}
 
 func (p *Proxy) handleHTTP(w http.ResponseWriter, req *http.Request) {
 	outReq := req.Clone(req.Context())

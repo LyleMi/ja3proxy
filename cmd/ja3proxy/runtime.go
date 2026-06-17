@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"time"
 
 	cflog "github.com/cloudflare/cfssl/log"
@@ -17,22 +18,21 @@ type App struct {
 	CA              *CertificateAuthority
 	SessionKey      *SessionKeyHelper
 	TLSFingerprints *TLSFingerprintStore
-
-	upstreamDialer **UpstreamDialer
 }
 
 func newDefaultApp() *App {
 	return &App{
-		Config:          &Config,
-		CA:              &CA,
-		SessionKey:      &SessionKey,
-		TLSFingerprints: &defaultTLSFingerprintStore,
-		upstreamDialer:  &CustomDialer,
+		Config:          &RunningConfig{},
+		CA:              &CertificateAuthority{},
+		SessionKey:      &SessionKeyHelper{},
+		TLSFingerprints: &TLSFingerprintStore{},
 	}
 }
 
 func (app *App) run() error {
-	app.parseFlags()
+	if err := app.parseFlags(os.Args[1:]); err != nil {
+		return err
+	}
 	app.configureLogging()
 	if err := app.ensureCA(); err != nil {
 		return err
@@ -54,17 +54,18 @@ func (app *App) run() error {
 	return app.serve(proxy)
 }
 
-func (app *App) parseFlags() {
-	flag.StringVar(&app.Config.Cert, "cert", "credentials/cert.pem", "proxy CA cert")
-	flag.StringVar(&app.Config.Key, "key", "credentials/key.pem", "proxy CA key")
-	flag.StringVar(&app.Config.Addr, "addr", "", "proxy listen host")
-	flag.StringVar(&app.Config.Port, "port", "8080", "proxy listen port")
-	flag.StringVar(&app.Config.TLSClient, "client", "Golang", "utls client")
-	flag.StringVar(&app.Config.TLSVersion, "version", "0", "utls client version")
-	flag.StringVar(&app.Config.FingerprintConfig, "fingerprint-config", "", "JSON file to hot-reload utls client/version")
-	flag.StringVar(&app.Config.Upstream, "upstream", "", "upstream proxy, e.g. 127.0.0.1:1080, socks5 only")
-	flag.BoolVar(&app.Config.Debug, "debug", false, "enable debug")
-	flag.Parse()
+func (app *App) parseFlags(args []string) error {
+	flags := flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
+	flags.StringVar(&app.Config.Cert, "cert", "credentials/cert.pem", "proxy CA cert")
+	flags.StringVar(&app.Config.Key, "key", "credentials/key.pem", "proxy CA key")
+	flags.StringVar(&app.Config.Addr, "addr", "", "proxy listen host")
+	flags.StringVar(&app.Config.Port, "port", "8080", "proxy listen port")
+	flags.StringVar(&app.Config.TLSClient, "client", "Golang", "utls client")
+	flags.StringVar(&app.Config.TLSVersion, "version", "0", "utls client version")
+	flags.StringVar(&app.Config.FingerprintConfig, "fingerprint-config", "", "JSON file to hot-reload utls client/version")
+	flags.StringVar(&app.Config.Upstream, "upstream", "", "upstream proxy, e.g. 127.0.0.1:1080, socks5 only")
+	flags.BoolVar(&app.Config.Debug, "debug", false, "enable debug")
+	return flags.Parse(args)
 }
 
 func (app *App) configureLogging() {
@@ -116,7 +117,6 @@ func (app *App) buildProxy() (*Proxy, error) {
 	if err != nil {
 		return nil, fmt.Errorf("configure upstream proxy: %w", err)
 	}
-	app.setUpstreamDialer(dialer)
 
 	return NewProxy(dialer.Dial, app.tunnelHandler().Connect, dialer.Transport), nil
 }
@@ -138,13 +138,6 @@ func (app *App) serve(proxy *Proxy) error {
 		return fmt.Errorf("serve proxy: %w", err)
 	}
 	return nil
-}
-
-func (app *App) setUpstreamDialer(dialer *UpstreamDialer) {
-	if app.upstreamDialer == nil {
-		return
-	}
-	*app.upstreamDialer = dialer
 }
 
 func (app *App) configuredTLSFingerprint() TLSFingerprint {

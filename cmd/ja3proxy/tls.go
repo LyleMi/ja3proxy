@@ -18,17 +18,6 @@ type TunnelHandler struct {
 	DefaultTLSVersion string
 }
 
-func newDefaultTunnelHandler() *TunnelHandler {
-	return &TunnelHandler{
-		Debug:             Config.Debug,
-		CA:                &CA,
-		SessionKey:        &SessionKey,
-		TLSFingerprints:   &defaultTLSFingerprintStore,
-		DefaultTLSClient:  Config.TLSClient,
-		DefaultTLSVersion: Config.TLSVersion,
-	}
-}
-
 func (handler *TunnelHandler) configuredTLSFingerprint() TLSFingerprint {
 	if handler != nil && handler.TLSFingerprints != nil {
 		if fingerprint, ok := handler.TLSFingerprints.Get(); ok {
@@ -43,13 +32,9 @@ func (handler *TunnelHandler) configuredTLSFingerprint() TLSFingerprint {
 	}
 
 	return TLSFingerprint{
-		Client:  Config.TLSClient,
-		Version: Config.TLSVersion,
+		Client:  utls.HelloGolang.Client,
+		Version: utls.HelloGolang.Version,
 	}
-}
-
-func customTLSWrap(conn net.Conn, sni string, nextProtos []string) (*utls.UConn, error) {
-	return newDefaultTunnelHandler().customTLSWrap(conn, sni, nextProtos)
 }
 
 func (handler *TunnelHandler) customTLSWrap(conn net.Conn, sni string, nextProtos []string) (*utls.UConn, error) {
@@ -143,10 +128,6 @@ func (handler *TunnelHandler) generateCertificate(sni string) (tls.Certificate, 
 	}
 
 	return handler.CA.GenerateCertificate(*handler.SessionKey, sni)
-}
-
-func connect(sni string, destConn net.Conn, clientConn net.Conn) {
-	newDefaultTunnelHandler().Connect(sni, destConn, clientConn)
 }
 
 func (handler *TunnelHandler) Connect(sni string, destConn net.Conn, clientConn net.Conn) {

@@ -7,15 +7,19 @@ import (
 )
 
 func junction(destConn net.Conn, clientConn net.Conn) {
+	pipeConns(destConn, clientConn, destConn, clientConn)
+}
+
+func pipeConns(destConn net.Conn, clientConn net.Conn, destWriter io.Writer, clientWriter io.Writer) {
 	chDone := make(chan struct{}, 2)
 
 	go func() {
-		copyAndClose(destConn, clientConn, destConn, "copy client to dest error:")
+		copyAndClose(destWriter, clientConn, destConn, "copy client to dest error:")
 		chDone <- struct{}{}
 	}()
 
 	go func() {
-		copyAndClose(clientConn, destConn, clientConn, "copy dest to client error:")
+		copyAndClose(clientWriter, destConn, clientConn, "copy dest to client error:")
 		chDone <- struct{}{}
 	}()
 

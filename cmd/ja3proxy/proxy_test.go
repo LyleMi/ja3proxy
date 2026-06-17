@@ -715,7 +715,7 @@ func TestHandleTunnelingDialErrorReturnsServiceUnavailable(t *testing.T) {
 
 func TestHandleTunnelingWithoutHijackerReturnsInternalServerError(t *testing.T) {
 	proxy := NewProxy(func(network, addr string) (net.Conn, error) {
-		t.Fatal("tunnelDial should not be called without Hijacker support")
+		t.Fatal("dial should not be called without Hijacker support")
 		return nil, nil
 	}, nil, nil)
 
@@ -755,9 +755,9 @@ func TestHandleTunnelingSuccessDialsHijacksAndConnects(t *testing.T) {
 		return destConn, nil
 	}
 
-	connectCalls := make(chan tunnelConnectCall, 1)
+	connectCalls := make(chan connectInvocation, 1)
 	connect := func(sni string, destConn net.Conn, clientConn net.Conn) {
-		connectCalls <- tunnelConnectCall{
+		connectCalls <- connectInvocation{
 			sni:        sni,
 			destConn:   destConn,
 			clientConn: clientConn,
@@ -805,11 +805,11 @@ func TestHandleTunnelingSuccessDialsHijacksAndConnects(t *testing.T) {
 		t.Fatalf("events = %v, want [hijack]", rec.events)
 	}
 
-	var call tunnelConnectCall
+	var call connectInvocation
 	select {
 	case call = <-connectCalls:
 	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for tunnelConnect")
+		t.Fatal("timed out waiting for connect")
 	}
 
 	if call.sni != "example.com" {
@@ -907,7 +907,7 @@ func TestHandleTunnelingHijackErrorClosesDestination(t *testing.T) {
 	proxy := NewProxy(func(network, addr string) (net.Conn, error) {
 		return destConn, nil
 	}, func(sni string, destConn net.Conn, clientConn net.Conn) {
-		t.Fatal("tunnelConnect should not be called after hijack failure")
+		t.Fatal("connect should not be called after hijack failure")
 	}, nil)
 
 	rec := &failingHijackResponseRecorder{ResponseRecorder: httptest.NewRecorder()}
@@ -921,7 +921,7 @@ func TestHandleTunnelingHijackErrorClosesDestination(t *testing.T) {
 	}
 }
 
-type tunnelConnectCall struct {
+type connectInvocation struct {
 	sni        string
 	destConn   net.Conn
 	clientConn net.Conn

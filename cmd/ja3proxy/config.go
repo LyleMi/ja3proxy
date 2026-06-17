@@ -27,10 +27,3 @@ type SessionKeyHelper struct {
 	privateKey *ecdsa.PrivateKey
 	PEMBlock   []byte
 }
-
-var (
-	Config       RunningConfig
-	CustomDialer *UpstreamDialer
-	CA           CertificateAuthority
-	SessionKey   SessionKeyHelper
-)

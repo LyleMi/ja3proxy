@@ -153,5 +153,3 @@ func (s *TLSFingerprintStore) WatchFile(ctx context.Context, path string, interv
 
 	return nil
 }
-
-var defaultTLSFingerprintStore TLSFingerprintStore
