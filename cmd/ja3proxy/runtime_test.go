@@ -1,11 +1,14 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"flag"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func newRuntimeTestApp(t *testing.T) *App {
@@ -137,7 +140,7 @@ func TestConfigureTLSFingerprintReturnsValidationError(t *testing.T) {
 	app.Config.TLSClient = "UnsupportedClient"
 	app.Config.TLSVersion = "0"
 
-	err := app.configureTLSFingerprint()
+	err := app.configureTLSFingerprint(context.Background())
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -150,12 +153,50 @@ func TestConfigureTLSFingerprintReturnsFileError(t *testing.T) {
 	app := newRuntimeTestApp(t)
 	app.Config.FingerprintConfig = filepath.Join(t.TempDir(), "missing.json")
 
-	err := app.configureTLSFingerprint()
+	err := app.configureTLSFingerprint(context.Background())
 	if err == nil {
 		t.Fatal("expected error")
 	}
 	if !strings.Contains(err.Error(), "failed loading fingerprint config") {
 		t.Fatalf("error = %q, want fingerprint file context", err)
+	}
+}
+
+func TestConfigureTLSFingerprintPassesContextToWatcher(t *testing.T) {
+	type contextKey struct{}
+
+	app := newRuntimeTestApp(t)
+	app.Config.FingerprintConfig = filepath.Join(t.TempDir(), "fingerprint.json")
+
+	baseCtx, cancel := context.WithCancel(context.Background())
+	ctx := context.WithValue(baseCtx, contextKey{}, "runtime")
+	called := false
+	app.watchFingerprintFile = func(gotCtx context.Context, path string, interval time.Duration) error {
+		called = true
+		if gotCtx.Value(contextKey{}) != "runtime" {
+			t.Fatal("watcher did not receive configured context")
+		}
+		if path != app.Config.FingerprintConfig {
+			t.Fatalf("watch path = %q, want %q", path, app.Config.FingerprintConfig)
+		}
+		if interval != 2*time.Second {
+			t.Fatalf("watch interval = %s, want 2s", interval)
+		}
+
+		cancel()
+		select {
+		case <-gotCtx.Done():
+		default:
+			t.Fatal("watcher context was not canceled")
+		}
+		return nil
+	}
+
+	if err := app.configureTLSFingerprint(ctx); err != nil {
+		t.Fatalf("configureTLSFingerprint() error = %v", err)
+	}
+	if !called {
+		t.Fatal("watcher was not called")
 	}
 }
 
@@ -172,5 +213,16 @@ func TestBuildProxyReturnsUpstreamValidationError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "configure upstream proxy") {
 		t.Fatalf("error = %q, want upstream context", err)
+	}
+}
+
+func TestServeReturnsCanceledContext(t *testing.T) {
+	app := newRuntimeTestApp(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := app.serve(ctx, NewProxy(nil, nil, nil))
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("serve() error = %v, want context.Canceled", err)
 	}
 }

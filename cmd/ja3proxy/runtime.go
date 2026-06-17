@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -18,6 +19,8 @@ type App struct {
 	CA              *CertificateAuthority
 	SessionKey      *SessionKeyHelper
 	TLSFingerprints *TLSFingerprintStore
+
+	watchFingerprintFile func(context.Context, string, time.Duration) error
 }
 
 func newDefaultApp() *App {
@@ -30,6 +33,12 @@ func newDefaultApp() *App {
 }
 
 func (app *App) run() error {
+	return app.runWithContext(context.Background())
+}
+
+func (app *App) runWithContext(ctx context.Context) error {
+	ctx = runtimeContext(ctx)
+
 	if err := app.parseFlags(os.Args[1:]); err != nil {
 		return err
 	}
@@ -43,7 +52,7 @@ func (app *App) run() error {
 	if err := app.generateSessionKey(); err != nil {
 		return fmt.Errorf("failed generating session key: %w", err)
 	}
-	if err := app.configureTLSFingerprint(); err != nil {
+	if err := app.configureTLSFingerprint(ctx); err != nil {
 		return err
 	}
 
@@ -51,7 +60,14 @@ func (app *App) run() error {
 	if err != nil {
 		return err
 	}
-	return app.serve(proxy)
+	return app.serve(ctx, proxy)
+}
+
+func runtimeContext(ctx context.Context) context.Context {
+	if ctx == nil {
+		return context.Background()
+	}
+	return ctx
 }
 
 func (app *App) parseFlags(args []string) error {
@@ -98,9 +114,9 @@ func (app *App) generateSessionKey() error {
 	return app.SessionKey.Generate()
 }
 
-func (app *App) configureTLSFingerprint() error {
+func (app *App) configureTLSFingerprint(ctx context.Context) error {
 	if app.Config.FingerprintConfig != "" {
-		if err := app.TLSFingerprints.WatchFile(context.Background(), app.Config.FingerprintConfig, 2*time.Second); err != nil {
+		if err := app.watchTLSFingerprintFile(runtimeContext(ctx), app.Config.FingerprintConfig, 2*time.Second); err != nil {
 			return fmt.Errorf("failed loading fingerprint config: %w", err)
 		}
 	} else if err := app.TLSFingerprints.SetValidated(TLSFingerprint{
@@ -112,6 +128,13 @@ func (app *App) configureTLSFingerprint() error {
 	return nil
 }
 
+func (app *App) watchTLSFingerprintFile(ctx context.Context, path string, interval time.Duration) error {
+	if app.watchFingerprintFile != nil {
+		return app.watchFingerprintFile(ctx, path, interval)
+	}
+	return app.TLSFingerprints.WatchFile(ctx, path, interval)
+}
+
 func (app *App) buildProxy() (*Proxy, error) {
 	dialer, err := NewUpstreamDialer(app.Config.Upstream, time.Second*10)
 	if err != nil {
@@ -121,7 +144,12 @@ func (app *App) buildProxy() (*Proxy, error) {
 	return NewProxy(dialer.Dial, app.tunnelHandler().Connect, dialer.Transport), nil
 }
 
-func (app *App) serve(proxy *Proxy) error {
+func (app *App) serve(ctx context.Context, proxy *Proxy) error {
+	ctx = runtimeContext(ctx)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	listener, err := net.Listen("tcp", app.Config.Addr+":"+app.Config.Port)
 	if err != nil {
 		return fmt.Errorf("listen on %s:%s: %w", app.Config.Addr, app.Config.Port, err)
@@ -134,7 +162,15 @@ func (app *App) serve(proxy *Proxy) error {
 		"HTTP/SOCKS5 Proxy Server listen at %s:%s, with tls fingerprint %s %s\n",
 		app.Config.Addr, app.Config.Port, app.configuredTLSFingerprint().Version, app.configuredTLSFingerprint().Client,
 	)
+	stopClosingServer := context.AfterFunc(ctx, func() {
+		_ = server.Close()
+	})
+	defer stopClosingServer()
+
 	if err := server.Serve(newMixedProxyListener(listener, proxy)); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil && (errors.Is(err, http.ErrServerClosed) || errors.Is(err, net.ErrClosed)) {
+			return ctxErr
+		}
 		return fmt.Errorf("serve proxy: %w", err)
 	}
 	return nil
