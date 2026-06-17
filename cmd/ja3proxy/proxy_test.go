@@ -83,6 +83,98 @@ func TestFileExists(t *testing.T) {
 	}
 }
 
+func TestProxyDefaultDependencies(t *testing.T) {
+	proxy := NewProxy(nil, nil, nil)
+
+	if proxy.transport() != http.DefaultTransport {
+		t.Fatalf("default transport = %T, want http.DefaultTransport", proxy.transport())
+	}
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen on local TCP address: %v", err)
+	}
+	defer listener.Close()
+
+	accepted := make(chan net.Conn, 1)
+	acceptErr := make(chan error, 1)
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			acceptErr <- err
+			return
+		}
+		accepted <- conn
+	}()
+
+	conn, err := proxy.dial("tcp", listener.Addr().String())
+	if err != nil {
+		t.Fatalf("default tunnel dial error = %v", err)
+	}
+	defer conn.Close()
+
+	select {
+	case acceptedConn := <-accepted:
+		acceptedConn.Close()
+	case err := <-acceptErr:
+		t.Fatalf("accept default tunnel dial: %v", err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for default tunnel dial")
+	}
+
+	destConn, upstreamPeer := net.Pipe()
+	clientConn, clientPeer := net.Pipe()
+	for _, conn := range []net.Conn{destConn, upstreamPeer, clientConn, clientPeer} {
+		defer conn.Close()
+		if err := conn.SetDeadline(time.Now().Add(2 * time.Second)); err != nil {
+			t.Fatalf("set deadline: %v", err)
+		}
+	}
+
+	connectDone := make(chan struct{})
+	go func() {
+		proxy.connect("", destConn, clientConn)
+		close(connectDone)
+	}()
+
+	payload := []byte("default connect")
+	writeErr := make(chan error, 1)
+	go func() {
+		_, err := clientPeer.Write(payload)
+		writeErr <- err
+	}()
+	got := make([]byte, len(payload))
+	if _, err := io.ReadFull(upstreamPeer, got); err != nil {
+		t.Fatalf("read through default tunnel connect: %v", err)
+	}
+	if string(got) != string(payload) {
+		t.Fatalf("default tunnel connect payload = %q, want %q", got, payload)
+	}
+	select {
+	case err := <-writeErr:
+		if err != nil {
+			t.Fatalf("write through default tunnel connect: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("write through default tunnel connect timed out")
+	}
+
+	clientPeer.Close()
+	upstreamPeer.Close()
+	select {
+	case <-connectDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("default tunnel connect did not return after peers closed")
+	}
+}
+
+func TestNilProxyUsesDefaultTransport(t *testing.T) {
+	var proxy *Proxy
+	if proxy.transport() != http.DefaultTransport {
+		t.Fatalf("nil proxy transport = %T, want http.DefaultTransport", proxy.transport())
+	}
+}
+
 func TestUpstreamALPN(t *testing.T) {
 	if got := upstreamALPN(nil); !reflect.DeepEqual(got, []string{"http/1.1"}) {
 		t.Fatalf("upstreamALPN(nil) = %v, want [http/1.1]", got)
@@ -101,6 +193,38 @@ func TestClientALPN(t *testing.T) {
 
 	if got := clientALPN("h2"); !reflect.DeepEqual(got, []string{"h2"}) {
 		t.Fatalf("clientALPN(\"h2\") = %v, want [h2]", got)
+	}
+}
+
+func TestGenerateCertificateNilGuardReturnsErrors(t *testing.T) {
+	tests := []struct {
+		name    string
+		handler *TunnelHandler
+		want    string
+	}{
+		{
+			name:    "nil handler",
+			handler: nil,
+			want:    "CA certificate has not been loaded",
+		},
+		{
+			name:    "nil CA",
+			handler: &TunnelHandler{},
+			want:    "CA certificate has not been loaded",
+		},
+		{
+			name:    "nil session key",
+			handler: &TunnelHandler{CA: &CertificateAuthority{}},
+			want:    "session key has not been generated",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := tt.handler.generateCertificate("example.com:443"); err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("TunnelHandler.generateCertificate() error = %v, want %q", err, tt.want)
+			}
+		})
 	}
 }
 
@@ -902,6 +1026,60 @@ func TestHandleTunnelingWritesPlainConnectResponse(t *testing.T) {
 	close(releaseConnect)
 }
 
+func TestHandleTunnelingConnectResponseWriteErrorClosesConnections(t *testing.T) {
+	destConn := &closeTrackingConn{}
+	clientConn := &writeErrorConn{err: errors.New("write failed")}
+	proxy := NewProxy(func(network, addr string) (net.Conn, error) {
+		return destConn, nil
+	}, func(sni string, destConn net.Conn, clientConn net.Conn) {
+		t.Fatal("connect should not be called after CONNECT response write failure")
+	}, nil)
+
+	rec := &connectResponseErrorRecorder{
+		ResponseRecorder: httptest.NewRecorder(),
+		conn:             clientConn,
+		writerSize:       1,
+	}
+	req := httptest.NewRequest(http.MethodConnect, "http://example.com:443", nil)
+	req.Host = "example.com:443"
+
+	proxy.ServeHTTP(rec, req)
+
+	if !destConn.closed {
+		t.Fatal("destination connection was not closed after CONNECT response write failure")
+	}
+	if !clientConn.closed {
+		t.Fatal("client connection was not closed after CONNECT response write failure")
+	}
+}
+
+func TestHandleTunnelingConnectResponseFlushErrorClosesConnections(t *testing.T) {
+	destConn := &closeTrackingConn{}
+	clientConn := &writeErrorConn{err: errors.New("flush failed")}
+	proxy := NewProxy(func(network, addr string) (net.Conn, error) {
+		return destConn, nil
+	}, func(sni string, destConn net.Conn, clientConn net.Conn) {
+		t.Fatal("connect should not be called after CONNECT response flush failure")
+	}, nil)
+
+	rec := &connectResponseErrorRecorder{
+		ResponseRecorder: httptest.NewRecorder(),
+		conn:             clientConn,
+		writerSize:       len(connectEstablishedResponse) + 1,
+	}
+	req := httptest.NewRequest(http.MethodConnect, "http://example.com:443", nil)
+	req.Host = "example.com:443"
+
+	proxy.ServeHTTP(rec, req)
+
+	if !destConn.closed {
+		t.Fatal("destination connection was not closed after CONNECT response flush failure")
+	}
+	if !clientConn.closed {
+		t.Fatal("client connection was not closed after CONNECT response flush failure")
+	}
+}
+
 func TestHandleTunnelingHijackErrorClosesDestination(t *testing.T) {
 	destConn := &closeTrackingConn{}
 	proxy := NewProxy(func(network, addr string) (net.Conn, error) {
@@ -954,12 +1132,41 @@ func (r *failingHijackResponseRecorder) Hijack() (net.Conn, *bufio.ReadWriter, e
 	return nil, nil, errors.New("hijack failed")
 }
 
+type connectResponseErrorRecorder struct {
+	*httptest.ResponseRecorder
+	conn       *writeErrorConn
+	writerSize int
+}
+
+func (r *connectResponseErrorRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	rw := bufio.NewReadWriter(
+		bufio.NewReader(r.conn),
+		bufio.NewWriterSize(r.conn, r.writerSize),
+	)
+	return r.conn, rw, nil
+}
+
 type closeTrackingConn struct {
 	net.Conn
 	closed bool
 }
 
 func (conn *closeTrackingConn) Close() error {
+	conn.closed = true
+	return nil
+}
+
+type writeErrorConn struct {
+	net.Conn
+	closed bool
+	err    error
+}
+
+func (conn *writeErrorConn) Write(_ []byte) (int, error) {
+	return 0, conn.err
+}
+
+func (conn *writeErrorConn) Close() error {
 	conn.closed = true
 	return nil
 }

@@ -30,9 +30,9 @@ func fileExists(filename string) bool {
 }
 
 type Proxy struct {
-	Dial      func(network, addr string) (net.Conn, error)
-	Connect   func(sni string, destConn net.Conn, clientConn net.Conn)
-	Transport http.RoundTripper
+	tunnelDial    func(network, addr string) (net.Conn, error)
+	tunnelConnect func(sni string, destConn net.Conn, clientConn net.Conn)
+	httpTransport http.RoundTripper
 }
 
 func NewProxy(
@@ -50,9 +50,9 @@ func NewProxy(
 		transport = http.DefaultTransport
 	}
 	return &Proxy{
-		Dial:      dial,
-		Connect:   connect,
-		Transport: transport,
+		tunnelDial:    dial,
+		tunnelConnect: connect,
+		httpTransport: transport,
 	}
 }
 
@@ -65,23 +65,23 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *Proxy) dial(network, addr string) (net.Conn, error) {
-	if p != nil && p.Dial != nil {
-		return p.Dial(network, addr)
+	if p != nil && p.tunnelDial != nil {
+		return p.tunnelDial(network, addr)
 	}
 	return defaultTunnelDial(network, addr)
 }
 
 func (p *Proxy) connect(sni string, destConn net.Conn, clientConn net.Conn) {
-	if p != nil && p.Connect != nil {
-		p.Connect(sni, destConn, clientConn)
+	if p != nil && p.tunnelConnect != nil {
+		p.tunnelConnect(sni, destConn, clientConn)
 		return
 	}
 	defaultTunnelConnect(sni, destConn, clientConn)
 }
 
 func (p *Proxy) transport() http.RoundTripper {
-	if p != nil && p.Transport != nil {
-		return p.Transport
+	if p != nil && p.httpTransport != nil {
+		return p.httpTransport
 	}
 	return http.DefaultTransport
 }
