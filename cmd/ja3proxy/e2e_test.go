@@ -85,8 +85,7 @@ func TestE2EHTTPProxyRequest(t *testing.T) {
 }
 
 func TestE2EHTTPSConnectProxyRequest(t *testing.T) {
-	restoreTestTLSState(t)
-	configureTestCA(t)
+	handler := newTestTunnelHandler(t, utls.HelloGolang)
 
 	const targetHost = "target.test"
 	upstreamSNI := make(chan string, 1)
@@ -137,12 +136,12 @@ func TestE2EHTTPSConnectProxyRequest(t *testing.T) {
 			return nil, fmt.Errorf("addr = %q, want %q", addr, targetAddr)
 		}
 		return dialer.Dial(network, upstreamURL.Host)
-	}, tunnelConnect, nil)
+	}, handler.Connect, nil)
 	proxyServer := httptest.NewServer(proxy)
 	t.Cleanup(proxyServer.Close)
 
 	roots := x509.NewCertPool()
-	roots.AddCert(CA.x509Cert)
+	roots.AddCert(handler.CA.x509Cert)
 	client := newProxyHTTPClient(t, proxyServer.URL, &tls.Config{
 		RootCAs: roots,
 	})
@@ -184,10 +183,7 @@ func TestE2EHTTPSConnectProxyRequest(t *testing.T) {
 }
 
 func TestE2EHTTPSConnectProxyChangesJA3Fingerprint(t *testing.T) {
-	restoreTestTLSState(t)
-	configureTestCA(t)
-	Config.TLSClient = utls.HelloFirefox_63.Client
-	Config.TLSVersion = utls.HelloFirefox_63.Version
+	handler := newTestTunnelHandler(t, utls.HelloFirefox_63)
 
 	const targetHost = "target.test"
 	upstreamAddr, upstreamResults := newJA3CaptureTLSServer(t)
@@ -206,12 +202,12 @@ func TestE2EHTTPSConnectProxyChangesJA3Fingerprint(t *testing.T) {
 			return nil, fmt.Errorf("addr = %q, want %q", addr, targetAddr)
 		}
 		return dialer.Dial(network, upstreamAddr)
-	}, tunnelConnect, nil)
+	}, handler.Connect, nil)
 	proxyServer := httptest.NewServer(proxy)
 	t.Cleanup(proxyServer.Close)
 
 	roots := x509.NewCertPool()
-	roots.AddCert(CA.x509Cert)
+	roots.AddCert(handler.CA.x509Cert)
 	client := newProxyHTTPClient(t, proxyServer.URL, &tls.Config{
 		RootCAs: roots,
 	})
@@ -572,33 +568,26 @@ func isJA3GREASE(value uint16) bool {
 	return value == utls.GREASE_PLACEHOLDER || high == low && high&0x0f == 0x0a
 }
 
-func configureTestCA(t *testing.T) {
+func newTestTunnelHandler(t *testing.T, clientHelloID utls.ClientHelloID) *TunnelHandler {
 	t.Helper()
 
 	dir := t.TempDir()
-	Config.Debug = false
-	Config.TLSClient = utls.HelloGolang.Client
-	Config.TLSVersion = utls.HelloGolang.Version
-	Config.Cert = filepath.Join(dir, "ca.pem")
-	Config.Key = filepath.Join(dir, "ca-key.pem")
+	certPath := filepath.Join(dir, "ca.pem")
+	keyPath := filepath.Join(dir, "ca-key.pem")
 
-	if err := generateCA(); err != nil {
-		t.Fatalf("generateCA() error = %v", err)
+	ca := &CertificateAuthority{}
+	if err := ca.Generate(certPath, keyPath); err != nil {
+		t.Fatalf("CertificateAuthority.Generate() error = %v", err)
 	}
-	if err := generateSessionKey(); err != nil {
-		t.Fatalf("generateSessionKey() error = %v", err)
+	session := &SessionKeyHelper{}
+	if err := session.Generate(); err != nil {
+		t.Fatalf("SessionKeyHelper.Generate() error = %v", err)
 	}
-}
 
-func restoreTestTLSState(t *testing.T) {
-	t.Helper()
-
-	oldConfig := Config
-	oldCA := CA
-	oldSessionKey := SessionKey
-	t.Cleanup(func() {
-		Config = oldConfig
-		CA = oldCA
-		SessionKey = oldSessionKey
-	})
+	return &TunnelHandler{
+		CA:                ca,
+		SessionKey:        session,
+		DefaultTLSClient:  clientHelloID.Client,
+		DefaultTLSVersion: clientHelloID.Version,
+	}
 }

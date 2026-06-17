@@ -155,23 +155,3 @@ func (s *TLSFingerprintStore) WatchFile(ctx context.Context, path string, interv
 }
 
 var defaultTLSFingerprintStore TLSFingerprintStore
-
-func configuredTLSFingerprint() TLSFingerprint {
-	return newDefaultApp().configuredTLSFingerprint()
-}
-
-func setTLSFingerprint(fingerprint TLSFingerprint) error {
-	return defaultTLSFingerprintStore.SetValidated(fingerprint)
-}
-
-func resetTLSFingerprint() {
-	defaultTLSFingerprintStore.Reset()
-}
-
-func applyTLSFingerprintFile(path string) error {
-	return defaultTLSFingerprintStore.ApplyFile(path)
-}
-
-func watchTLSFingerprintFile(ctx context.Context, path string, interval time.Duration) error {
-	return defaultTLSFingerprintStore.WatchFile(ctx, path, interval)
-}

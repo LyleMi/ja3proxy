@@ -1,6 +1,8 @@
 package main
 
 import (
+	"log"
+
 	cflog "github.com/cloudflare/cfssl/log"
 )
 
@@ -9,5 +11,7 @@ func init() {
 }
 
 func main() {
-	newDefaultApp().run()
+	if err := newDefaultApp().run(); err != nil {
+		log.Fatal(err)
+	}
 }

@@ -7,7 +7,6 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"os"
 	"time"
 
 	cflog "github.com/cloudflare/cfssl/log"
@@ -32,20 +31,27 @@ func newDefaultApp() *App {
 	}
 }
 
-func (app *App) run() {
+func (app *App) run() error {
 	app.parseFlags()
 	app.configureLogging()
-	app.ensureCA()
+	if err := app.ensureCA(); err != nil {
+		return err
+	}
 	if err := app.loadExistingCA(); err != nil {
-		log.Fatal("Failed loading CA: ", err)
+		return fmt.Errorf("failed loading CA: %w", err)
 	}
 	if err := app.generateSessionKey(); err != nil {
-		log.Fatal("Failed generating session key: ", err)
+		return fmt.Errorf("failed generating session key: %w", err)
 	}
-	app.configureTLSFingerprint()
+	if err := app.configureTLSFingerprint(); err != nil {
+		return err
+	}
 
-	proxy := app.buildProxy()
-	app.serve(proxy)
+	proxy, err := app.buildProxy()
+	if err != nil {
+		return err
+	}
+	return app.serve(proxy)
 }
 
 func (app *App) parseFlags() {
@@ -67,22 +73,20 @@ func (app *App) configureLogging() {
 	}
 }
 
-func (app *App) ensureCA() {
+func (app *App) ensureCA() error {
 	if !fileExists(app.Config.Cert) || !fileExists(app.Config.Key) {
 		if fileExists(app.Config.Cert) {
-			log.Println("found CA cert, but no corresponding key")
-			os.Exit(-1)
+			return fmt.Errorf("found CA cert %q, but no corresponding key %q", app.Config.Cert, app.Config.Key)
 		} else if fileExists(app.Config.Key) {
-			log.Println("found CA key, but no corresponding cert")
-			os.Exit(-1)
+			return fmt.Errorf("found CA key %q, but no corresponding cert %q", app.Config.Key, app.Config.Cert)
 		}
 
 		log.Println("CA cert and key do not exist, generating")
-		err := app.CA.Generate(app.Config.Cert, app.Config.Key)
-		if err != nil {
-			log.Fatal("Failed generating CA", err)
+		if err := app.CA.Generate(app.Config.Cert, app.Config.Key); err != nil {
+			return fmt.Errorf("failed generating CA: %w", err)
 		}
 	}
+	return nil
 }
 
 func (app *App) loadExistingCA() error {
@@ -93,33 +97,34 @@ func (app *App) generateSessionKey() error {
 	return app.SessionKey.Generate()
 }
 
-func (app *App) configureTLSFingerprint() {
+func (app *App) configureTLSFingerprint() error {
 	if app.Config.FingerprintConfig != "" {
 		if err := app.TLSFingerprints.WatchFile(context.Background(), app.Config.FingerprintConfig, 2*time.Second); err != nil {
-			log.Fatal("Failed loading fingerprint config", err)
+			return fmt.Errorf("failed loading fingerprint config: %w", err)
 		}
 	} else if err := app.TLSFingerprints.SetValidated(TLSFingerprint{
 		Client:  app.Config.TLSClient,
 		Version: app.Config.TLSVersion,
 	}); err != nil {
-		log.Fatal("Failed configuring TLS fingerprint", err)
+		return fmt.Errorf("failed configuring TLS fingerprint: %w", err)
 	}
+	return nil
 }
 
-func (app *App) buildProxy() *Proxy {
+func (app *App) buildProxy() (*Proxy, error) {
 	dialer, err := NewUpstreamDialer(app.Config.Upstream, time.Second*10)
 	if err != nil {
-		log.Fatal(err)
+		return nil, fmt.Errorf("configure upstream proxy: %w", err)
 	}
 	app.setUpstreamDialer(dialer)
 
-	return NewProxy(dialer.Dial, tunnelConnect, dialer.Transport)
+	return NewProxy(dialer.Dial, app.tunnelHandler().Connect, dialer.Transport), nil
 }
 
-func (app *App) serve(proxy *Proxy) {
+func (app *App) serve(proxy *Proxy) error {
 	listener, err := net.Listen("tcp", app.Config.Addr+":"+app.Config.Port)
 	if err != nil {
-		log.Fatal(err)
+		return fmt.Errorf("listen on %s:%s: %w", app.Config.Addr, app.Config.Port, err)
 	}
 	server := &http.Server{
 		Handler: proxy,
@@ -129,11 +134,10 @@ func (app *App) serve(proxy *Proxy) {
 		"HTTP/SOCKS5 Proxy Server listen at %s:%s, with tls fingerprint %s %s\n",
 		app.Config.Addr, app.Config.Port, app.configuredTLSFingerprint().Version, app.configuredTLSFingerprint().Client,
 	)
-	err = server.Serve(newMixedProxyListener(listener, proxy))
-	if err != nil {
-		log.Fatal(err)
-		os.Exit(-1)
+	if err := server.Serve(newMixedProxyListener(listener, proxy)); err != nil {
+		return fmt.Errorf("serve proxy: %w", err)
 	}
+	return nil
 }
 
 func (app *App) setUpstreamDialer(dialer *UpstreamDialer) {
@@ -151,5 +155,16 @@ func (app *App) configuredTLSFingerprint() TLSFingerprint {
 	return TLSFingerprint{
 		Client:  app.Config.TLSClient,
 		Version: app.Config.TLSVersion,
+	}
+}
+
+func (app *App) tunnelHandler() *TunnelHandler {
+	return &TunnelHandler{
+		Debug:             app.Config.Debug,
+		CA:                app.CA,
+		SessionKey:        app.SessionKey,
+		TLSFingerprints:   app.TLSFingerprints,
+		DefaultTLSClient:  app.Config.TLSClient,
+		DefaultTLSVersion: app.Config.TLSVersion,
 	}
 }

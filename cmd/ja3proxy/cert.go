@@ -21,10 +21,6 @@ import (
 	"github.com/cloudflare/cfssl/signer/local"
 )
 
-func generateCA() error {
-	return CA.Generate(Config.Cert, Config.Key)
-}
-
 func (ca *CertificateAuthority) Generate(certPath, keyPath string) error {
 	csr := cfsr.CertificateRequest{
 		CN:         "ja3proxy CA",
@@ -87,10 +83,6 @@ func ensureParentDir(path string) error {
 	return os.MkdirAll(dir, 0700)
 }
 
-func generateSessionKey() error {
-	return SessionKey.Generate()
-}
-
 func (session *SessionKeyHelper) Generate() error {
 	privKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -120,10 +112,6 @@ func stripPort(s string) string {
 		return strings.TrimSuffix(strings.TrimPrefix(s, "["), "]")
 	}
 	return s
-}
-
-func generateCertificate(sni string) (tls.Certificate, error) {
-	return CA.GenerateCertificate(SessionKey, sni)
 }
 
 func (ca *CertificateAuthority) GenerateCertificate(session SessionKeyHelper, sni string) (tls.Certificate, error) {
@@ -175,10 +163,6 @@ func (ca *CertificateAuthority) GenerateCertificate(session SessionKeyHelper, sn
 
 	tlsCert, err := tls.X509KeyPair(certBytes, session.PEMBlock)
 	return tlsCert, err
-}
-
-func loadExistingCA() error {
-	return CA.Load(Config.Cert, Config.Key)
 }
 
 func (ca *CertificateAuthority) Load(certPath, keyPath string) error {

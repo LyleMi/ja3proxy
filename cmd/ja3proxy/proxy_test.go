@@ -129,16 +129,13 @@ func TestLimitSpecALPN(t *testing.T) {
 }
 
 func TestCustomTLSWrapHandshakeNegotiatesALPNAndSNI(t *testing.T) {
-	oldConfig := Config
-	Config.TLSClient = utls.HelloGolang.Client
-	Config.TLSVersion = utls.HelloGolang.Version
-	t.Cleanup(func() {
-		Config = oldConfig
-	})
-
 	const serverName = "upstream.test"
 	nextProtos := []string{"h2", "http/1.1"}
 	listener, serverResults := newLocalTLSServer(t, []string{"h2", "http/1.1"})
+	handler := &TunnelHandler{
+		DefaultTLSClient:  utls.HelloGolang.Client,
+		DefaultTLSVersion: utls.HelloGolang.Version,
+	}
 
 	conn, err := net.DialTimeout("tcp", listener.Addr().String(), 2*time.Second)
 	if err != nil {
@@ -148,10 +145,10 @@ func TestCustomTLSWrapHandshakeNegotiatesALPNAndSNI(t *testing.T) {
 		t.Fatalf("set client deadline: %v", err)
 	}
 
-	tlsConn, err := customTLSWrap(conn, serverName, nextProtos)
+	tlsConn, err := handler.customTLSWrap(conn, serverName, nextProtos)
 	if err != nil {
 		conn.Close()
-		t.Fatalf("customTLSWrap() error = %v", err)
+		t.Fatalf("TunnelHandler.customTLSWrap() error = %v", err)
 	}
 	defer tlsConn.Close()
 
@@ -176,16 +173,13 @@ func TestCustomTLSWrapHandshakeNegotiatesALPNAndSNI(t *testing.T) {
 }
 
 func TestCustomTLSWrapWithUTLSPresetLimitsALPN(t *testing.T) {
-	oldConfig := Config
-	Config.TLSClient = utls.HelloFirefox_Auto.Client
-	Config.TLSVersion = utls.HelloFirefox_Auto.Version
-	t.Cleanup(func() {
-		Config = oldConfig
-	})
-
 	const serverName = "upstream.test"
 	nextProtos := []string{"http/1.1"}
 	listener, serverResults := newLocalTLSServer(t, []string{"h2", "http/1.1"})
+	handler := &TunnelHandler{
+		DefaultTLSClient:  utls.HelloFirefox_Auto.Client,
+		DefaultTLSVersion: utls.HelloFirefox_Auto.Version,
+	}
 
 	conn, err := net.DialTimeout("tcp", listener.Addr().String(), 2*time.Second)
 	if err != nil {
@@ -195,10 +189,10 @@ func TestCustomTLSWrapWithUTLSPresetLimitsALPN(t *testing.T) {
 		t.Fatalf("set client deadline: %v", err)
 	}
 
-	tlsConn, err := customTLSWrap(conn, serverName, nextProtos)
+	tlsConn, err := handler.customTLSWrap(conn, serverName, nextProtos)
 	if err != nil {
 		conn.Close()
-		t.Fatalf("customTLSWrap() error = %v", err)
+		t.Fatalf("TunnelHandler.customTLSWrap() error = %v", err)
 	}
 	defer tlsConn.Close()
 
@@ -223,18 +217,15 @@ func TestCustomTLSWrapWithUTLSPresetLimitsALPN(t *testing.T) {
 }
 
 func TestCustomTLSWrapReturnsHandshakeError(t *testing.T) {
-	oldConfig := Config
-	Config.TLSClient = utls.HelloGolang.Client
-	Config.TLSVersion = utls.HelloGolang.Version
-	t.Cleanup(func() {
-		Config = oldConfig
-	})
-
 	listener := newBadUpstreamServer(t, func(conn net.Conn) {
 		buf := make([]byte, 1)
 		_, _ = conn.Read(buf)
 		_, _ = conn.Write([]byte("HTTP/1.1 200 OK\r\n\r\n"))
 	})
+	handler := &TunnelHandler{
+		DefaultTLSClient:  utls.HelloGolang.Client,
+		DefaultTLSVersion: utls.HelloGolang.Version,
+	}
 
 	conn, err := net.DialTimeout("tcp", listener.Addr().String(), 2*time.Second)
 	if err != nil {
@@ -244,36 +235,32 @@ func TestCustomTLSWrapReturnsHandshakeError(t *testing.T) {
 		t.Fatalf("set client deadline: %v", err)
 	}
 
-	tlsConn, err := customTLSWrap(conn, "upstream.test", []string{"http/1.1"})
+	tlsConn, err := handler.customTLSWrap(conn, "upstream.test", []string{"http/1.1"})
 	if err == nil {
 		tlsConn.Close()
-		t.Fatal("customTLSWrap() error = nil, want handshake error")
+		t.Fatal("TunnelHandler.customTLSWrap() error = nil, want handshake error")
 	}
 	conn.Close()
 }
 
 func TestConnectMITMHandshakeAndRoundTrip(t *testing.T) {
-	oldConfig := Config
-	oldCA := CA
-	oldSessionKey := SessionKey
-	t.Cleanup(func() {
-		Config = oldConfig
-		CA = oldCA
-		SessionKey = oldSessionKey
-	})
-
 	dir := t.TempDir()
-	Config.Debug = false
-	Config.TLSClient = utls.HelloGolang.Client
-	Config.TLSVersion = utls.HelloGolang.Version
-	Config.Cert = filepath.Join(dir, "ca.pem")
-	Config.Key = filepath.Join(dir, "ca-key.pem")
+	certPath := filepath.Join(dir, "ca.pem")
+	keyPath := filepath.Join(dir, "ca-key.pem")
 
-	if err := generateCA(); err != nil {
-		t.Fatalf("generateCA() error = %v", err)
+	ca := CertificateAuthority{}
+	if err := ca.Generate(certPath, keyPath); err != nil {
+		t.Fatalf("CertificateAuthority.Generate() error = %v", err)
 	}
-	if err := generateSessionKey(); err != nil {
-		t.Fatalf("generateSessionKey() error = %v", err)
+	session := SessionKeyHelper{}
+	if err := session.Generate(); err != nil {
+		t.Fatalf("SessionKeyHelper.Generate() error = %v", err)
+	}
+	handler := &TunnelHandler{
+		CA:                &ca,
+		SessionKey:        &session,
+		DefaultTLSClient:  utls.HelloGolang.Client,
+		DefaultTLSVersion: utls.HelloGolang.Version,
 	}
 
 	const serverName = "target.test"
@@ -293,12 +280,12 @@ func TestConnectMITMHandshakeAndRoundTrip(t *testing.T) {
 
 	connectDone := make(chan struct{})
 	go func() {
-		connect(serverName, destConn, clientConn)
+		handler.Connect(serverName, destConn, clientConn)
 		close(connectDone)
 	}()
 
 	roots := x509.NewCertPool()
-	roots.AddCert(CA.x509Cert)
+	roots.AddCert(ca.x509Cert)
 	clientTLSConn := tls.Client(clientPeer, &tls.Config{
 		ServerName: serverName,
 		RootCAs:    roots,
@@ -323,7 +310,7 @@ func TestConnectMITMHandshakeAndRoundTrip(t *testing.T) {
 	if leaf.Subject.CommonName != serverName {
 		t.Fatalf("MITM certificate CN = %q, want %q", leaf.Subject.CommonName, serverName)
 	}
-	if err := leaf.CheckSignatureFrom(CA.x509Cert); err != nil {
+	if err := leaf.CheckSignatureFrom(ca.x509Cert); err != nil {
 		t.Fatalf("MITM certificate was not signed by test CA: %v", err)
 	}
 
@@ -975,26 +962,6 @@ type closeTrackingConn struct {
 func (conn *closeTrackingConn) Close() error {
 	conn.closed = true
 	return nil
-}
-
-func replaceTunnelDial(t *testing.T, dial func(network, addr string) (net.Conn, error)) {
-	t.Helper()
-
-	original := tunnelDial
-	tunnelDial = dial
-	t.Cleanup(func() {
-		tunnelDial = original
-	})
-}
-
-func replaceTunnelConnect(t *testing.T, connect func(sni string, destConn net.Conn, clientConn net.Conn)) {
-	t.Helper()
-
-	original := tunnelConnect
-	tunnelConnect = connect
-	t.Cleanup(func() {
-		tunnelConnect = original
-	})
 }
 
 func TestHandleHTTPWritesUpstreamResponse(t *testing.T) {

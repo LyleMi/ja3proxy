@@ -56,10 +56,6 @@ func NewProxy(
 	}
 }
 
-func defaultProxy() *Proxy {
-	return NewProxy(tunnelDial, tunnelConnect, http.DefaultTransport)
-}
-
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodConnect {
 		p.handleTunneling(w, r)
@@ -140,10 +136,6 @@ func (p *Proxy) handleTunneling(w http.ResponseWriter, r *http.Request) {
 	go p.connect(strings.Split(r.Host, ":")[0], destConn, tunnelClientConn)
 }
 
-func handleTunneling(w http.ResponseWriter, r *http.Request) {
-	defaultProxy().handleTunneling(w, r)
-}
-
 var tunnelDial = func(network, addr string) (net.Conn, error) {
 	return CustomDialer.Dial(network, addr)
 }
@@ -164,10 +156,6 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, req *http.Request) {
 	copyHeader(w.Header(), resp.Header)
 	w.WriteHeader(resp.StatusCode)
 	io.Copy(w, resp.Body)
-}
-
-func handleHTTP(w http.ResponseWriter, req *http.Request) {
-	defaultProxy().handleHTTP(w, req)
 }
 
 func copyHeader(dst, src http.Header) {
