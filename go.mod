@@ -1,13 +1,11 @@
 module github.com/lylemi/ja3proxy
 
-go 1.24
-
-toolchain go1.24.1
+go 1.25.0
 
 require (
 	github.com/cloudflare/cfssl v1.6.5
 	github.com/refraction-networking/utls v1.8.2
-	golang.org/x/net v0.38.0
+	golang.org/x/net v0.56.0
 )
 
 require (
@@ -20,9 +18,9 @@ require (
 	github.com/weppos/publicsuffix-go v0.30.0 // indirect
 	github.com/zmap/zcrypto v0.0.0-20230310154051-c8b263fd8300 // indirect
 	github.com/zmap/zlint/v3 v3.5.0 // indirect
-	golang.org/x/crypto v0.36.0 // indirect
-	golang.org/x/sys v0.31.0 // indirect
-	golang.org/x/text v0.23.0 // indirect
+	golang.org/x/crypto v0.53.0 // indirect
+	golang.org/x/sys v0.46.0 // indirect
+	golang.org/x/text v0.38.0 // indirect
 	google.golang.org/protobuf v1.32.0 // indirect
 	k8s.io/klog/v2 v2.100.1 // indirect
 )
