@@ -22,7 +22,7 @@ RUN CGO_ENABLED=0 \
     GOARM="${TARGETVARIANT#v}" \
     go build -trimpath -ldflags="-s -w" -o /out/ja3proxy ./cmd/ja3proxy
 
-FROM gcr.io/distroless/static-debian12@sha256:6447365a6337c3732f412d1b74357b30a633831955b2bc45552b0086be907687
+FROM gcr.io/distroless/static-debian12@sha256:d75cdd72874d4790092fcb1b058493ecf6bb5bf2b2b897045b00ff01d91843f2
 
 LABEL org.opencontainers.image.source="https://github.com/LyleMi/ja3proxy"
 
