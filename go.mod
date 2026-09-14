@@ -8,7 +8,7 @@ require (
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/cloudflare/cfssl v1.6.5
 	github.com/refraction-networking/utls v1.8.2
-	golang.org/x/net v0.58.0
+	golang.org/x/net v0.59.0
 )
 
 require (
@@ -39,9 +39,9 @@ require (
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	github.com/zmap/zcrypto v0.0.0-20230310154051-c8b263fd8300 // indirect
 	github.com/zmap/zlint/v3 v3.5.0 // indirect
-	golang.org/x/crypto v0.55.0 // indirect
-	golang.org/x/sys v0.47.0 // indirect
-	golang.org/x/text v0.41.0 // indirect
+	golang.org/x/crypto v0.57.0 // indirect
+	golang.org/x/sys v0.48.0 // indirect
+	golang.org/x/text v0.42.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 	k8s.io/klog/v2 v2.100.1 // indirect
 )
