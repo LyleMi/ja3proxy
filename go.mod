@@ -1,12 +1,12 @@
 module github.com/lylemi/ja3proxy
 
-go 1.26.6
+go 1.27
 
 require (
 	github.com/charmbracelet/bubbles v1.0.0
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
-	github.com/cloudflare/cfssl v1.6.5
+	github.com/cloudflare/cfssl v1.7.0
 	github.com/refraction-networking/utls v1.8.2
 	golang.org/x/net v0.59.0
 )
@@ -22,8 +22,8 @@ require (
 	github.com/clipperhouse/stringish v0.1.1 // indirect
 	github.com/clipperhouse/uax29/v2 v2.5.0 // indirect
 	github.com/erikgeiser/coninput v0.0.0-20211004153227-1c3628e74d0f // indirect
-	github.com/go-logr/logr v1.2.4 // indirect
-	github.com/google/certificate-transparency-go v1.1.7 // indirect
+	github.com/go-logr/logr v1.4.1 // indirect
+	github.com/google/certificate-transparency-go v1.1.8 // indirect
 	github.com/jmoiron/sqlx v1.3.5 // indirect
 	github.com/klauspost/compress v1.17.4 // indirect
 	github.com/lucasb-eyer/go-colorful v1.3.0 // indirect
@@ -43,5 +43,5 @@ require (
 	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
-	k8s.io/klog/v2 v2.100.1 // indirect
+	k8s.io/klog/v2 v2.120.1 // indirect
 )
