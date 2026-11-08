@@ -28,14 +28,14 @@ func wrapTrafficTunnel(session *TrafficSessionHandle, destConn net.Conn, clientC
 		return destConn, clientConn
 	}
 	return &trafficReadConn{
-			Conn:      destConn,
-			session:   session,
-			direction: trafficDirectionDownload,
-		}, &trafficReadConn{
-			Conn:      clientConn,
-			session:   session,
-			direction: trafficDirectionUpload,
-		}
+		Conn:      destConn,
+		session:   session,
+		direction: trafficDirectionDownload,
+	}, &trafficReadConn{
+		Conn:      clientConn,
+		session:   session,
+		direction: trafficDirectionUpload,
+	}
 }
 
 func WrapTunnel(session *TrafficSessionHandle, destConn net.Conn, clientConn net.Conn) (net.Conn, net.Conn) {
