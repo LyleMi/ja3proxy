@@ -1,6 +1,6 @@
 module github.com/lylemi/ja3proxy
 
-go 1.26.6
+go 1.27.3
 
 require (
 	github.com/charmbracelet/bubbles v1.0.0
@@ -8,11 +8,11 @@ require (
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/cloudflare/cfssl v1.6.5
 	github.com/refraction-networking/utls v1.8.2
-	golang.org/x/net v0.59.0
+	golang.org/x/net v0.60.0
 )
 
 require (
-	github.com/andybalholm/brotli v1.0.6 // indirect
+	github.com/andybalholm/brotli v1.2.7 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/charmbracelet/colorprofile v0.4.1 // indirect
 	github.com/charmbracelet/x/ansi v0.11.6 // indirect
@@ -25,7 +25,7 @@ require (
 	github.com/go-logr/logr v1.2.4 // indirect
 	github.com/google/certificate-transparency-go v1.1.7 // indirect
 	github.com/jmoiron/sqlx v1.3.5 // indirect
-	github.com/klauspost/compress v1.17.4 // indirect
+	github.com/klauspost/compress v1.20.2 // indirect
 	github.com/lucasb-eyer/go-colorful v1.3.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mattn/go-localereader v0.0.1 // indirect
