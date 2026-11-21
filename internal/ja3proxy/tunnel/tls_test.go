@@ -179,6 +179,7 @@ func TestLimitSpecALPN(t *testing.T) {
 			&utls.SNIExtension{},
 			&utls.ALPNExtension{AlpnProtocols: []string{"h2", "http/1.1", "h3"}},
 			&utls.ApplicationSettingsExtension{SupportedProtocols: []string{"h2", "h3"}},
+			&utls.ApplicationSettingsExtensionNew{SupportedProtocols: []string{"h2", "h3"}},
 		},
 	}
 
@@ -194,6 +195,31 @@ func TestLimitSpecALPN(t *testing.T) {
 	}
 	if !reflect.DeepEqual(alpn.AlpnProtocols, []string{"http/1.1"}) {
 		t.Fatalf("ALPN protocols = %v, want [http/1.1]", alpn.AlpnProtocols)
+	}
+}
+
+func TestLimitSpecALPNKeepsMatchingApplicationSettings(t *testing.T) {
+	sni := &utls.SNIExtension{}
+	alpn := &utls.ALPNExtension{AlpnProtocols: []string{"h2", "http/1.1", "h3"}}
+	oldALPS := &utls.ApplicationSettingsExtension{SupportedProtocols: []string{"h2", "h3"}}
+	newALPS := &utls.ApplicationSettingsExtensionNew{SupportedProtocols: []string{"h2", "h3"}}
+	spec := &utls.ClientHelloSpec{
+		Extensions: []utls.TLSExtension{sni, alpn, oldALPS, newALPS},
+	}
+
+	limitSpecALPN(spec, []string{"h2", "http/1.1"})
+
+	if !reflect.DeepEqual(spec.Extensions, []utls.TLSExtension{sni, alpn, oldALPS, newALPS}) {
+		t.Fatalf("extensions changed order or were removed: %v", spec.Extensions)
+	}
+	if !reflect.DeepEqual(alpn.AlpnProtocols, []string{"h2", "http/1.1"}) {
+		t.Fatalf("ALPN protocols = %v, want [h2 http/1.1]", alpn.AlpnProtocols)
+	}
+	if !reflect.DeepEqual(oldALPS.SupportedProtocols, []string{"h2"}) {
+		t.Fatalf("old ALPS protocols = %v, want [h2]", oldALPS.SupportedProtocols)
+	}
+	if !reflect.DeepEqual(newALPS.SupportedProtocols, []string{"h2"}) {
+		t.Fatalf("new ALPS protocols = %v, want [h2]", newALPS.SupportedProtocols)
 	}
 }
 

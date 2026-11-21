@@ -133,6 +133,11 @@ func limitSpecALPN(spec *utls.ClientHelloSpec, nextProtos []string) {
 			if len(ext.SupportedProtocols) > 0 {
 				extensions = append(extensions, extension)
 			}
+		case *utls.ApplicationSettingsExtensionNew:
+			ext.SupportedProtocols = matchingProtocols(ext.SupportedProtocols, nextProtos)
+			if len(ext.SupportedProtocols) > 0 {
+				extensions = append(extensions, extension)
+			}
 		default:
 			extensions = append(extensions, extension)
 		}
